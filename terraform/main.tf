@@ -61,15 +61,45 @@ module "ai_engine" {
   kb_docs_path       = var.kb_docs_path
 }
 
+module "monitoring_api" {
+  source          = "./modules/monitoring_api"
+  project         = local.project
+  tags            = local.tags
+  vpc_endpoint_id = module.network.vpc_endpoint_id
+}
+
 module "backend" {
-  source            = "./modules/backend"
-  project           = local.project
-  tags              = local.tags
-  region            = local.region
-  account_id        = local.account_id
-  llm_model_id      = var.llm_model_id
-  retrieval_k       = var.retrieval_k
-  knowledge_base_id = module.ai_engine.knowledge_base_id
+  source             = "./modules/backend"
+  project            = local.project
+  tags               = local.tags
+  region             = local.region
+  account_id         = local.account_id
+  llm_model_id       = var.llm_model_id
+  retrieval_k        = var.retrieval_k
+  knowledge_base_id  = module.ai_engine.knowledge_base_id
+  monitoring_api_url = module.monitoring_api.api_url
+  
+  private_subnet_ids = module.network.private_subnet_ids
+  lambda_sg_id       = module.network.lambda_sg_id
+  db_host            = module.database.db_host
+  db_name            = module.database.db_name
+  db_user            = module.database.db_user
+  db_password        = module.database.db_password
+}
+
+module "network" {
+  source  = "./modules/network"
+  project = local.project
+  tags    = local.tags
+}
+
+module "database" {
+  source             = "./modules/database"
+  project            = local.project
+  tags               = local.tags
+  private_subnet_ids = module.network.private_subnet_ids
+  rds_sg_id          = module.network.rds_sg_id
+  lambda_sg_id       = module.network.lambda_sg_id
 }
 
 module "frontend" {

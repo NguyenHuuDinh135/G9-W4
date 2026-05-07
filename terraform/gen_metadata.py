@@ -1,7 +1,7 @@
 import os
 import json
 
-docs_dir = "../data_package/knowledge_base"
+docs_dir = "../../data_package/knowledge_base"
 files = [f for f in os.listdir(docs_dir) if f.endswith(".md")]
 
 for f in files:

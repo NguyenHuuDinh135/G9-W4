@@ -96,13 +96,25 @@ resource "aws_iam_role" "action_group_lambda" {
 
 resource "aws_iam_role_policy_attachment" "action_group_lambda_logs" {
   role       = aws_iam_role.action_group_lambda.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+}
+
+resource "null_resource" "action_group_build" {
+  triggers = {
+    always_run = timestamp()
+  }
+
+  provisioner "local-exec" {
+    command = "python build.py"
+    working_dir = "${path.root}/../lambda"
+  }
 }
 
 data "archive_file" "lambda_action_group" {
   type        = "zip"
-  source_dir  = "../lambda"
+  source_dir  = "${path.root}/../lambda/.build"
   output_path = "${path.module}/.build/lambda_action_group.zip"
+  depends_on  = [null_resource.action_group_build]
 }
 
 resource "aws_lambda_function" "action_group" {
@@ -115,6 +127,21 @@ resource "aws_lambda_function" "action_group" {
   filename         = data.archive_file.lambda_action_group.output_path
   source_code_hash = data.archive_file.lambda_action_group.output_base64sha256
   tags             = var.tags
+
+  vpc_config {
+    subnet_ids         = var.private_subnet_ids
+    security_group_ids = [var.lambda_sg_id]
+  }
+
+  environment {
+    variables = {
+      MONITORING_API_URL = var.monitoring_api_url
+      DB_HOST            = var.db_host
+      DB_NAME            = var.db_name
+      DB_USER            = var.db_user
+      DB_PASSWORD        = var.db_password
+    }
+  }
 }
 
 resource "aws_lambda_permission" "bedrock_action_group" {

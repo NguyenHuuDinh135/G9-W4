@@ -26,3 +26,39 @@ variable "retrieval_k" {
   type    = number
   default = 10
 }
+
+variable "monitoring_api_url" {
+  description = "Monitoring API Gateway URL for action group tool calls"
+  type        = string
+}
+
+variable "private_subnet_ids" {
+  type    = list(string)
+  default = []
+}
+
+variable "lambda_sg_id" {
+  type    = string
+  default = ""
+}
+
+variable "db_host" {
+  type    = string
+  default = ""
+}
+
+variable "db_name" {
+  type    = string
+  default = ""
+}
+
+variable "db_user" {
+  type    = string
+  default = ""
+}
+
+variable "db_password" {
+  type    = string
+  default = ""
+}
+

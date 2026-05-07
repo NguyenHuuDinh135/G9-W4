@@ -12,3 +12,28 @@ override.tf.json
 .terraformrc
 terraform.rc
 .terraform.lock.hcl
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
+
+# Build and Deploy
+.build/
+*.zip
+*.rar
+*.tar.gz
+*.tgz
+*.bz2
+*.7z
+
+# Database
+*.db
+*.sqlite3
+
+# Misc
+response.json

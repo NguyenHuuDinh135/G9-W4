@@ -27,3 +27,8 @@ output "opensearch_collection_endpoint" {
   description = "OpenSearch Serverless collection endpoint"
   value       = module.ai_engine.opensearch_collection_endpoint
 }
+
+output "monitoring_api_url" {
+  description = "Monitoring API Gateway URL"
+  value       = module.monitoring_api.api_url
+}
