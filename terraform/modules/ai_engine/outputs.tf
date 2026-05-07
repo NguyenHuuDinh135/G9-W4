@@ -3,7 +3,7 @@ output "knowledge_base_id" {
 }
 
 output "kb_docs_bucket" {
-  value = aws_s3_bucket.kb_docs.id
+  value = aws_s3_bucket.kb_docs.bucket
 }
 
 output "opensearch_collection_endpoint" {

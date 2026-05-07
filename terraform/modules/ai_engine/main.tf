@@ -261,10 +261,17 @@ resource "aws_bedrockagent_data_source" "s3" {
 
   vector_ingestion_configuration {
     chunking_configuration {
-      chunking_strategy = "FIXED_SIZE"
-      fixed_size_chunking_configuration {
-        max_tokens         = 300
-        overlap_percentage = 20
+      chunking_strategy = "HIERARCHICAL"
+      hierarchical_chunking_configuration {
+        overlap_tokens = 60
+
+        level_configuration {
+          max_tokens = 1500
+        }
+
+        level_configuration {
+          max_tokens = 300
+        }
       }
     }
   }
@@ -287,11 +294,18 @@ resource "null_resource" "kb_sync" {
   provisioner "local-exec" {
     command = <<-EOT
       echo "Starting KB ingestion job..."
-      JOB=$(aws bedrock-agent start-ingestion-job         --knowledge-base-id ${aws_bedrockagent_knowledge_base.main.id}         --data-source-id ${local.data_source_id}         --query 'ingestionJob.ingestionJobId' --output text)
+      JOB=$(aws bedrock-agent start-ingestion-job \
+        --knowledge-base-id ${aws_bedrockagent_knowledge_base.main.id} \
+        --data-source-id ${local.data_source_id} \
+        --query 'ingestionJob.ingestionJobId' --output text)
       echo "Ingestion job ID: $JOB"
       echo "Waiting for ingestion to complete..."
       for i in $(seq 1 60); do
-        STATUS=$(aws bedrock-agent get-ingestion-job           --knowledge-base-id ${aws_bedrockagent_knowledge_base.main.id}           --data-source-id ${local.data_source_id}           --ingestion-job-id $JOB           --query 'ingestionJob.status' --output text)
+        STATUS=$(aws bedrock-agent get-ingestion-job \
+          --knowledge-base-id ${aws_bedrockagent_knowledge_base.main.id} \
+          --data-source-id ${local.data_source_id} \
+          --ingestion-job-id $JOB \
+          --query 'ingestionJob.status' --output text)
         echo "  Status: $STATUS"
         if [ "$STATUS" = "COMPLETE" ]; then
           echo "Ingestion complete!"

@@ -209,6 +209,11 @@ AVAILABLE SERVICES: PaymentGW, AuthSvc, OrderSvc, FraudDetector, NotificationSvc
   EOT
 
   tags = var.tags
+
+  # Model is managed via console — DeepSeek V3.2 causes API errors via Terraform
+  lifecycle {
+    ignore_changes = [foundation_model]
+  }
 }
 
 resource "aws_bedrockagent_agent_knowledge_base_association" "main" {
@@ -234,7 +239,15 @@ resource "aws_bedrockagent_agent_action_group" "tools" {
     member_functions {
       functions {
         name        = "query_database"
-        description = "Query GeekBrain's SQLite database for historical/structured data. Tables: monthly_costs (service costs by month), incidents (incident records), sla_targets (SLA metric targets), daily_metrics (daily service performance). Use for any question needing specific numbers."
+        description = <<-DESC
+          Execute a SQL SELECT query on GeekBrain's SQLite database containing HISTORICAL data.
+          Tables: monthly_costs (service, month, compute_cost, storage_cost, network_cost, third_party_cost, total_cost),
+          incidents (incident_id, service, date, severity, duration_minutes, root_cause, resolution, team_responsible, reported_by),
+          sla_targets (service, metric, target, measurement_window),
+          daily_metrics (date, service, latency_p99_ms, error_rate_percent, requests_per_minute, availability_percent).
+          USE THIS for: past costs, historical trends, SLA targets, incident records, daily metrics history.
+          DO NOT use for current/live/real-time data — use get_service_metrics or get_service_status instead.
+        DESC
         parameters {
           map_block_key = "sql_query"
           type          = "string"
@@ -245,45 +258,63 @@ resource "aws_bedrockagent_agent_action_group" "tools" {
 
       functions {
         name        = "get_service_status"
-        description = "Get current live status of a specific service: healthy/degraded/down, uptime percentages, active alerts. Use for 'is X running?' or 'what is the status of X?' questions."
+        description = <<-DESC
+          Get the CURRENT operational status of ONE specific service.
+          Returns: status (healthy/degraded/down), uptime_30d, uptime_90d, active_alerts count, last_incident ID.
+          USE THIS for: "Is X running?", "What is the status of X?", "Is X healthy?", "Any alerts on X?"
+        DESC
         parameters {
           map_block_key = "service_name"
           type          = "string"
-          description   = "Service name: PaymentGW, AuthSvc, OrderSvc, FraudDetector, NotificationSvc, or ReportingSvc"
+          description   = "Exact service name: PaymentGW, AuthSvc, OrderSvc, FraudDetector, NotificationSvc, or ReportingSvc"
           required      = true
         }
       }
 
       functions {
         name        = "get_service_metrics"
-        description = "Get current live performance metrics: latency (p50/p95/p99 in ms), error rate (%), requests per minute. Use for real-time performance questions."
+        description = <<-DESC
+          Get CURRENT LIVE performance metrics for ONE specific service.
+          Returns: latency_ms (p50/p95/p99), error_rate_percent, requests_per_minute, cpu_utilization_percent, memory_utilization_percent.
+          USE THIS for: "What is X's current latency?", "How many requests does X handle?", "What is X's error rate right now?"
+          To compare metrics across services, call this tool MULTIPLE TIMES (once per service) or use compare_services for a quick ranking.
+        DESC
         parameters {
           map_block_key = "service_name"
           type          = "string"
-          description   = "Service name: PaymentGW, AuthSvc, OrderSvc, FraudDetector, NotificationSvc, or ReportingSvc"
+          description   = "Exact service name: PaymentGW, AuthSvc, OrderSvc, FraudDetector, NotificationSvc, or ReportingSvc"
           required      = true
         }
       }
 
       functions {
         name        = "list_services"
-        description = "List all monitored services in the GeekBrain system."
+        description = "List all 6 monitored services in the GeekBrain system. Use when you need to know available service names."
       }
 
       functions {
         name        = "get_incident_history"
-        description = "Get past incident records for a service or all services. Returns severity, duration, root cause, and resolution."
+        description = <<-DESC
+          Get historical incident records from the monitoring system for a specific service or all services.
+          Returns: incident_id, service, date, severity, duration_minutes, root_cause, resolution.
+          USE THIS for: "What incidents happened to X?", "Show recent incidents", "What was the root cause of INC-005?"
+        DESC
         parameters {
           map_block_key = "service_name"
           type          = "string"
-          description   = "Service name to filter, or 'all' for all services"
+          description   = "Service name to filter incidents, or 'all' for all services"
           required      = true
         }
       }
 
       functions {
         name        = "compare_services"
-        description = "Compare a specific metric across all services and rank them. Use when asked to compare or rank services."
+        description = <<-DESC
+          Rank ALL 6 services by a single metric and return them sorted highest-to-lowest.
+          Available metrics: latency_p99, error_rate, requests_per_minute.
+          USE THIS for: "Which service has the highest X?", "Rank services by Y", "Compare all services on Z".
+          This is a convenience shortcut that internally calls get_service_metrics for each service.
+        DESC
         parameters {
           map_block_key = "metric"
           type          = "string"

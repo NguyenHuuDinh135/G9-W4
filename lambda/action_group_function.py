@@ -28,12 +28,12 @@ SERVICE_STATUS = {
 }
 
 BASE_METRICS = {
-    "PaymentGW": {"latency_ms": {"p50": 45, "p95": 120, "p99": 185}, "error_rate_percent": 0.12, "requests_per_minute": 1250},
-    "AuthSvc": {"latency_ms": {"p50": 12, "p95": 28, "p99": 45}, "error_rate_percent": 0.02, "requests_per_minute": 3200},
-    "OrderSvc": {"latency_ms": {"p50": 85, "p95": 180, "p99": 250}, "error_rate_percent": 0.08, "requests_per_minute": 420},
-    "FraudDetector": {"latency_ms": {"p50": 65, "p95": 110, "p99": 145}, "error_rate_percent": 0.05, "requests_per_minute": 1250},
-    "NotificationSvc": {"latency_ms": {"p50": 1200, "p95": 2800, "p99": 3200}, "error_rate_percent": 1.20, "requests_per_minute": 850},
-    "ReportingSvc": {"latency_ms": {"p50": 350, "p95": 800, "p99": 1200}, "error_rate_percent": 0.15, "requests_per_minute": 45},
+    "PaymentGW": {"latency_ms": {"p50": 45, "p95": 120, "p99": 185}, "error_rate_percent": 0.08, "requests_per_minute": 12500, "cpu_utilization_percent": 62, "memory_utilization_percent": 71},
+    "AuthSvc": {"latency_ms": {"p50": 12, "p95": 30, "p99": 45}, "error_rate_percent": 0.005, "requests_per_minute": 28000, "cpu_utilization_percent": 45, "memory_utilization_percent": 40},
+    "OrderSvc": {"latency_ms": {"p50": 85, "p95": 210, "p99": 320}, "error_rate_percent": 0.2, "requests_per_minute": 4200, "cpu_utilization_percent": 38, "memory_utilization_percent": 55},
+    "FraudDetector": {"latency_ms": {"p50": 35, "p95": 85, "p99": 120}, "error_rate_percent": 0.03, "requests_per_minute": 12500, "cpu_utilization_percent": 72, "memory_utilization_percent": 65},
+    "NotificationSvc": {"latency_ms": {"p50": 800, "p95": 2100, "p99": 3200}, "error_rate_percent": 2.1, "requests_per_minute": 1800, "cpu_utilization_percent": 88, "memory_utilization_percent": 92},
+    "ReportingSvc": {"latency_ms": {"p50": 450, "p95": 1200, "p99": 2100}, "error_rate_percent": 0.5, "requests_per_minute": 350, "cpu_utilization_percent": 55, "memory_utilization_percent": 68},
 }
 
 INCIDENTS = [
@@ -98,6 +98,8 @@ def get_service_metrics(service_name):
         "latency_ms": {"p50": _jitter_int(base["latency_ms"]["p50"]), "p95": _jitter_int(base["latency_ms"]["p95"]), "p99": _jitter_int(base["latency_ms"]["p99"])},
         "error_rate_percent": _jitter(base["error_rate_percent"]),
         "requests_per_minute": _jitter_int(base["requests_per_minute"]),
+        "cpu_utilization_percent": _jitter(base["cpu_utilization_percent"]),
+        "memory_utilization_percent": _jitter(base["memory_utilization_percent"]),
     }
 
 

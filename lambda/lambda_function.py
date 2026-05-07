@@ -46,6 +46,7 @@ def handler(event, context):
             "session_id": session_id,
             "tools_used": trace_info.get("tools_used", []),
             "sources": trace_info.get("sources", []),
+            "tool_details": trace_info.get("tool_details", []),
         })
 
     except Exception as e:
@@ -64,34 +65,65 @@ def invoke_agent(question, session_id):
     )
 
     answer = ""
-    trace_info = {"tools_used": [], "sources": []}
+    trace_info = {"tools_used": [], "sources": [], "tool_details": []}
 
     for event_stream in response.get("completion", []):
-        # Collect answer chunks
+        # Collect answer chunks + extract citations from attribution
         if "chunk" in event_stream:
-            chunk_bytes = event_stream["chunk"].get("bytes", b"")
+            chunk_data = event_stream["chunk"]
+            chunk_bytes = chunk_data.get("bytes", b"")
             answer += chunk_bytes.decode("utf-8")
+
+            # Extract source filenames from chunk attribution (primary source)
+            attribution = chunk_data.get("attribution", {})
+            for citation in attribution.get("citations", []):
+                for ref in citation.get("retrievedReferences", []):
+                    uri = _extract_uri(ref)
+                    if uri:
+                        filename = uri.split("/")[-1]
+                        if filename and filename not in trace_info["sources"]:
+                            trace_info["sources"].append(filename)
 
         # Collect trace information (tools used, KB sources)
         if "trace" in event_stream:
             trace = event_stream["trace"].get("trace", {})
+            orchestration = trace.get("orchestrationTrace", {})
 
             # Check for action group invocations (tool calls)
-            orchestration = trace.get("orchestrationTrace", {})
             if "invocationInput" in orchestration:
                 inv = orchestration["invocationInput"]
                 if "actionGroupInvocationInput" in inv:
-                    tool_name = inv["actionGroupInvocationInput"].get("function", "")
+                    ag_input = inv["actionGroupInvocationInput"]
+                    tool_name = ag_input.get("function", "")
                     if tool_name and tool_name not in trace_info["tools_used"]:
                         trace_info["tools_used"].append(tool_name)
+                    # Capture tool parameters (e.g. SQL query)
+                    params = {p["name"]: p.get("value", "") for p in ag_input.get("parameters", [])}
+                    if params:
+                        trace_info["tool_details"].append({
+                            "tool": tool_name,
+                            "parameters": params,
+                        })
 
-            # Check for KB retrieval (source documents)
-            if "invocationInput" in orchestration:
-                inv = orchestration["invocationInput"]
-                if "knowledgeBaseLookupInput" in inv:
-                    trace_info["sources"].append("knowledge_base")
+            # Extract source filenames from KB retrieval trace (fallback source)
+            if "observation" in orchestration:
+                obs = orchestration["observation"]
+                kb_output = obs.get("knowledgeBaseLookupOutput", {})
+                for ref in kb_output.get("retrievedReferences", []):
+                    uri = _extract_uri(ref)
+                    if uri:
+                        filename = uri.split("/")[-1]
+                        if filename and filename not in trace_info["sources"]:
+                            trace_info["sources"].append(filename)
 
     return answer, trace_info
+
+
+def _extract_uri(ref):
+    """Extract S3 URI from a retrieved reference object."""
+    location = ref.get("location", {})
+    s3_loc = location.get("s3Location", {})
+    return s3_loc.get("uri", "")
 
 
 def _response(status_code, body):

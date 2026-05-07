@@ -13,7 +13,7 @@ variable "aws_region" {
 variable "llm_model_id" {
   description = "Bedrock LLM model ID"
   type        = string
-  default     = "us.anthropic.claude-3-haiku-20240307-v1:0"
+  default     = "deepseek.v3.2"
 }
 
 variable "embedding_model_id" {

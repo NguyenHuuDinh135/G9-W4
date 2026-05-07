@@ -53,17 +53,17 @@ resource "aws_s3_object" "frontend_html" {
 resource "aws_s3_object" "frontend_css" {
   bucket       = aws_s3_bucket.frontend.id
   key          = "style.css"
-  source       = "../frontend/style.css"
+  content      = file("../frontend/style.css")
   content_type = "text/css"
-  etag         = filemd5("../frontend/style.css")
+  etag         = md5(file("../frontend/style.css"))
 }
 
 resource "aws_s3_object" "frontend_js" {
   bucket       = aws_s3_bucket.frontend.id
   key          = "app.js"
-  source       = "../frontend/app.js"
+  content      = file("../frontend/app.js")
   content_type = "application/javascript"
-  etag         = filemd5("../frontend/app.js")
+  etag         = md5(file("../frontend/app.js"))
 }
 
 resource "aws_cloudfront_origin_access_control" "frontend" {
