@@ -1,9 +1,9 @@
 output "vpc_id" {
-  value = data.aws_vpc.default.id
+  value = aws_vpc.main.id
 }
 
 output "private_subnet_ids" {
-  value = slice(data.aws_subnets.default.ids, 0, 2)
+  value = aws_subnet.private[*].id
 }
 
 output "lambda_sg_id" {

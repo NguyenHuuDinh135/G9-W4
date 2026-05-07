@@ -223,8 +223,9 @@ RULES:
 5. For questions about CURRENT/LIVE status or real-time performance, use get_service_status or get_service_metrics tools.
 6. For factual questions about people, policies, processes, architecture — answer from the knowledge base directly.
 7. If you cannot find the answer, say so honestly. Do not hallucinate.
-8. Be concise but complete. Use bullet points for complex answers.
+8. Be EXTREMELY concise. Keep your answers under 100 words to prevent system timeouts. Do not over-explain.
 9. When comparing services, use the compare_services tool for accurate data.
+10. To save time, if compare_services gives you the metric value, DO NOT also call get_service_metrics.
 
 DATABASE SCHEMA (for query_database tool):
 - monthly_costs: service, month, compute_cost, storage_cost, network_cost, third_party_cost, total_cost
@@ -338,14 +339,14 @@ resource "aws_bedrockagent_agent_action_group" "tools" {
         name        = "compare_services"
         description = <<-DESC
           Rank ALL 6 services by a single metric and return them sorted highest-to-lowest.
-          Available metrics: latency_p99, error_rate, requests_per_minute.
+          Available metrics: latency_p99, error_rate, requests_per_minute, cpu_utilization_percent, memory_utilization_percent.
           USE THIS for: "Which service has the highest X?", "Rank services by Y", "Compare all services on Z".
           This is a convenience shortcut that internally calls get_service_metrics for each service.
         DESC
         parameters {
           map_block_key = "metric"
           type          = "string"
-          description   = "Metric to compare: latency_p99, error_rate, or requests_per_minute"
+          description   = "Metric to compare: latency_p99, error_rate, requests_per_minute, cpu_utilization_percent, memory_utilization_percent"
           required      = true
         }
       }

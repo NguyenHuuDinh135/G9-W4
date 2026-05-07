@@ -47,6 +47,8 @@ def handler(event, context):
             "tools_used": trace_info.get("tools_used", []),
             "sources": trace_info.get("sources", []),
             "tool_details": trace_info.get("tool_details", []),
+            "pipeline_traces": trace_info.get("pipeline_traces", []),
+            "raw_citations": trace_info.get("raw_citations", []),
         })
 
     except Exception as e:
@@ -65,7 +67,7 @@ def invoke_agent(question, session_id):
     )
 
     answer = ""
-    trace_info = {"tools_used": [], "sources": [], "tool_details": []}
+    trace_info = {"tools_used": [], "sources": [], "tool_details": [], "pipeline_traces": [], "raw_citations": []}
 
     for event_stream in response.get("completion", []):
         # Collect answer chunks + extract citations from attribution
@@ -76,6 +78,9 @@ def invoke_agent(question, session_id):
 
             # Extract source filenames from chunk attribution (primary source)
             attribution = chunk_data.get("attribution", {})
+            if attribution:
+                trace_info["raw_citations"].append(attribution)
+
             for citation in attribution.get("citations", []):
                 for ref in citation.get("retrievedReferences", []):
                     uri = _extract_uri(ref)
@@ -88,6 +93,10 @@ def invoke_agent(question, session_id):
         if "trace" in event_stream:
             trace = event_stream["trace"].get("trace", {})
             orchestration = trace.get("orchestrationTrace", {})
+            if orchestration:
+                trace_info["pipeline_traces"].append(orchestration)
+                # We log everything for CloudWatch
+                print(f"[TRACE EVENT] {json.dumps(orchestration, default=str)}")
 
             # Check for action group invocations (tool calls)
             if "invocationInput" in orchestration:
@@ -104,6 +113,29 @@ def invoke_agent(question, session_id):
                             "tool": tool_name,
                             "parameters": params,
                         })
+
+            # Check modelInvocationOutput for parallel tool calling
+            if "modelInvocationOutput" in orchestration:
+                try:
+                    raw_content = orchestration["modelInvocationOutput"]["rawResponse"]["content"]
+                    parsed = json.loads(raw_content)
+                    content_list = parsed.get("output", {}).get("message", {}).get("content", [])
+                    for item in content_list:
+                        if "toolUse" in item and item["toolUse"]:
+                            tool_name = item["toolUse"].get("name", "")
+                            if "__" in tool_name:
+                                tool_name = tool_name.split("__")[-1]
+                            if tool_name and tool_name not in trace_info["tools_used"]:
+                                trace_info["tools_used"].append(tool_name)
+                            
+                            params = item["toolUse"].get("input", {})
+                            if params:
+                                trace_info["tool_details"].append({
+                                    "tool": tool_name,
+                                    "parameters": params,
+                                })
+                except Exception as e:
+                    print(f"Failed to parse modelInvocationOutput: {e}")
 
             # Extract source filenames from KB retrieval trace (fallback source)
             if "observation" in orchestration:
@@ -131,5 +163,5 @@ def _response(status_code, body):
     return {
         "statusCode": status_code,
         "headers": CORS_HEADERS,
-        "body": json.dumps(body),
+        "body": json.dumps(body, default=str),
     }

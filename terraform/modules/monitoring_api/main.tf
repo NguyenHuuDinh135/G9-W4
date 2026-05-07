@@ -159,9 +159,9 @@ resource "aws_api_gateway_deployment" "monitoring" {
     redeployment = sha1(jsonencode([
       aws_api_gateway_method.root_get.id,
       aws_api_gateway_integration.root_get.id,
-      aws_api_gateway_resource.proxy.id,
       aws_api_gateway_method.proxy_get.id,
       aws_api_gateway_integration.proxy_get.id,
+      aws_api_gateway_rest_api_policy.monitoring.policy,
     ]))
   }
 

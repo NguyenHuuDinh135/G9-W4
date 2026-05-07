@@ -105,6 +105,8 @@ async function sendMessage() {
             tools: response.tools_used || [],
             sources: response.sources || [],
             toolDetails: response.tool_details || [],
+            pipelineTraces: response.pipeline_traces || [],
+            rawCitations: response.raw_citations || [],
         });
     } catch (err) {
         thinkingEl.remove();
@@ -137,7 +139,75 @@ async function callAPI(question) {
 
 // ═══════ Add message to UI ═══════
 function addMessage(role, text, meta = {}) {
-    const { tools = [], sources = [], toolDetails = [] } = meta;
+    const { tools = [], sources = [], toolDetails = [], pipelineTraces = [], rawCitations = [] } = meta;
+
+    let modifiedText = text;
+    const usedChunks = [];
+
+    // Process citations to add markers and collect used chunks
+    if (rawCitations && rawCitations.length > 0) {
+        rawCitations.forEach(attr => {
+            const citations = attr.citations || [];
+            citations.forEach(cit => {
+                const genText = cit.generatedResponsePart?.textResponsePart?.text;
+                const refs = cit.retrievedReferences || [];
+                
+                if (genText && refs.length > 0) {
+                    let citationMarkers = [];
+                    refs.forEach(ref => {
+                        const chunkText = ref.content?.text;
+                        const uri = ref.location?.s3Location?.uri || 'unknown';
+                        const filename = uri.split('/').pop();
+                        
+                        if (chunkText) {
+                            let snippet = chunkText;
+                            if (text) {
+                                const paragraphs = chunkText.split(/\n\s*\n|\n/);
+                                const answerWords = text.toLowerCase().match(/\b\w+\b/g) || [];
+                                let bestScore = -1;
+                                let bestPara = '';
+                                
+                                for (const p of paragraphs) {
+                                    const pWords = p.toLowerCase().match(/\b\w+\b/g) || [];
+                                    let score = 0;
+                                    const pWordSet = new Set(pWords);
+                                    for (const w of answerWords) {
+                                        if (w.length > 3 && pWordSet.has(w)) score++;
+                                    }
+                                    if (pWords.length > 5 && score > bestScore) {
+                                        bestScore = score;
+                                        bestPara = p;
+                                    }
+                                }
+                                if (bestScore > 0 && bestPara.length < chunkText.length) {
+                                    snippet = bestPara.trim();
+                                    if (snippet.length > 500) snippet = snippet.substring(0, 500) + '...';
+                                } else {
+                                    snippet = chunkText.substring(0, 500) + '...';
+                                }
+                            }
+
+                            let chunkIdx = usedChunks.findIndex(c => c.filename === filename && c.text === snippet);
+                            if (chunkIdx === -1) {
+                                usedChunks.push({ text: snippet, filename: filename });
+                                chunkIdx = usedChunks.length - 1;
+                            }
+                            // Only add if not already in the array
+                            const marker = `[${chunkIdx + 1}]`;
+                            if (!citationMarkers.includes(marker)) {
+                                citationMarkers.push(marker);
+                            }
+                        }
+                    });
+                    
+                    if (citationMarkers.length > 0) {
+                        const markerHtml = ` <sup class="citation-marker">${citationMarkers.join(', ')}</sup>`;
+                        modifiedText = modifiedText.replace(genText, genText + markerHtml);
+                    }
+                }
+            });
+        });
+    }
 
     const msg = document.createElement('div');
     msg.className = `message ${role}`;
@@ -154,11 +224,11 @@ function addMessage(role, text, meta = {}) {
     // Message bubble
     const bubble = document.createElement('div');
     bubble.className = 'message-bubble';
-    bubble.innerHTML = markdownToHtml(text);
+    bubble.innerHTML = markdownToHtml(modifiedText);
     content.appendChild(bubble);
 
-    // ── Meta section: sources + tools + query details ──
-    const hasMeta = sources.length > 0 || tools.length > 0 || toolDetails.length > 0;
+    // ── Meta section: sources + tools + query details + observability ──
+    const hasMeta = sources.length > 0 || tools.length > 0 || toolDetails.length > 0 || pipelineTraces.length > 0;
     if (hasMeta) {
         const metaDiv = document.createElement('div');
         metaDiv.className = 'message-meta';
@@ -211,6 +281,98 @@ function addMessage(role, text, meta = {}) {
             });
 
             metaDiv.appendChild(details);
+        }
+
+        // Observability Pipeline Dashboard
+        if (pipelineTraces.length > 0) {
+            const obsDetails = document.createElement('details');
+            obsDetails.className = 'observability-details';
+            const obsSummary = document.createElement('summary');
+            obsSummary.innerHTML = '🕵️‍♂️ Observability Pipeline (Traces)';
+            obsDetails.appendChild(obsSummary);
+
+            pipelineTraces.forEach((trace, idx) => {
+                const stepBlock = document.createElement('div');
+                stepBlock.className = 'trace-step';
+                
+                let stepTitle = `Step ${idx + 1}`;
+                let stepContent = '';
+
+                if (trace.modelInvocationInput) {
+                    stepTitle += ' - Model Invocation Input';
+                    stepContent = 'Preparing prompt for Bedrock LLM...';
+                }
+                else if (trace.invocationInput) {
+                    stepTitle += ' - Tool Invocation';
+                    const ag = trace.invocationInput.actionGroupInvocationInput;
+                    if (ag) {
+                        stepContent = `<strong>Function:</strong> ${ag.function}<br>`;
+                        if (ag.parameters && ag.parameters.length > 0) {
+                            stepContent += `<strong>Parameters:</strong> <code>${JSON.stringify(ag.parameters)}</code>`;
+                        }
+                    } else if (trace.invocationInput.knowledgeBaseLookupInput) {
+                        stepTitle += ' - Knowledge Base Query';
+                        stepContent = `<strong>Query:</strong> ${trace.invocationInput.knowledgeBaseLookupInput.text}`;
+                    }
+                }
+                else if (trace.observation) {
+                    stepTitle += ' - Observation';
+                    if (trace.observation.actionGroupInvocationOutput) {
+                         stepContent = `<strong>Tool Output:</strong> <code>${trace.observation.actionGroupInvocationOutput.text}</code>`;
+                    } else if (trace.observation.knowledgeBaseLookupOutput) {
+                         stepTitle += ' - KB Retrieved References';
+                         if (usedChunks.length > 0) {
+                             stepContent = `<em>Retrieved chunks from Knowledge Base. Showing ${usedChunks.length} exact chunks actually cited by the model:</em><br>`;
+                             usedChunks.forEach((chunk, rIdx) => {
+                                 stepContent += `<details class="kb-chunk"><summary>[${rIdx + 1}] 📄 ${chunk.filename}</summary><div class="kb-chunk-text">${chunk.text}</div></details>`;
+                             });
+                         } else {
+                             const refs = trace.observation.knowledgeBaseLookupOutput.retrievedReferences || [];
+                             stepContent = `<em>Retrieved ${refs.length} chunks from Knowledge Base.</em><br>`;
+                             refs.forEach((ref, rIdx) => {
+                                 const uri = ref.location?.s3Location?.uri || 'unknown';
+                                 const filename = uri.split('/').pop();
+                                 const text = ref.content?.text || '';
+                                 stepContent += `<details class="kb-chunk"><summary>📄 ${filename}</summary><div class="kb-chunk-text">${text}</div></details>`;
+                             });
+                         }
+                    } else if (trace.observation.finalResponse) {
+                         stepTitle += ' - Final Response';
+                         stepContent = `<em>LLM generated the final answer.</em>`;
+                    }
+                }
+                else if (trace.modelInvocationOutput) {
+                    stepTitle += ' - Model Invocation Output (Reasoning)';
+                     try {
+                         const raw = JSON.parse(trace.modelInvocationOutput.rawResponse.content);
+                         const msg = raw.output.message.content[0];
+                         if (msg && msg.text) {
+                              let cleanText = msg.text.replace(/<[^>]*DSML[^>]*function_calls[^>]*(?:>|$)/g, '').trim();
+                              if (cleanText) {
+                                  if (cleanText.length > 300) cleanText = cleanText.substring(0, 300) + '...';
+                                  cleanText = cleanText.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                                  cleanText = cleanText.replace(/\\n/g, '<br>').replace(/\n/g, '<br>');
+                                  stepContent = `<div class="llm-reasoning">${cleanText}</div>`;
+                              } else {
+                                  const nextMsg = raw.output.message.content[1];
+                                  if (nextMsg && nextMsg.toolUse) {
+                                      stepContent = `<strong>LLM Decision:</strong> Call tool <code>${nextMsg.toolUse.name}</code>`;
+                                  } else {
+                                      stepContent = '<em>LLM decided to call a tool immediately.</em>';
+                                  }
+                              }
+                         } else if (msg && msg.toolUse) {
+                              stepContent = `<strong>LLM Decision:</strong> Call tool <code>${msg.toolUse.name}</code>`;
+                         }
+                    } catch(e) {
+                         stepContent = 'LLM returned a response.';
+                    }
+                }
+
+                stepBlock.innerHTML = `<div class="trace-step-title">${stepTitle}</div><div class="trace-step-content">${stepContent}</div>`;
+                obsDetails.appendChild(stepBlock);
+            });
+            metaDiv.appendChild(obsDetails);
         }
 
         content.appendChild(metaDiv);

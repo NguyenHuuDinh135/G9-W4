@@ -113,6 +113,10 @@ def compare_services(metric):
             results[svc] = m.get("error_rate_percent", 0)
         elif metric == "requests_per_minute":
             results[svc] = m.get("requests_per_minute", 0)
+        elif metric == "cpu_utilization_percent":
+            results[svc] = m.get("cpu_utilization_percent", 0)
+        elif metric == "memory_utilization_percent":
+            results[svc] = m.get("memory_utilization_percent", 0)
 
     sorted_results = dict(sorted(results.items(), key=lambda x: x[1], reverse=True))
     return {"metric": metric, "ranking": sorted_results}

@@ -659,3 +659,92 @@ body {
     border-color: var(--text-muted);
     color: var(--text-primary);
 }
+
+/* ------- Observability Pipeline ------- */
+.observability-details {
+    margin-top: 8px;
+    border: 1px solid var(--accent);
+    border-radius: 8px;
+    overflow: hidden;
+    max-width: 600px;
+    background: rgba(124, 92, 252, 0.05);
+}
+
+.observability-details summary {
+    padding: 8px 12px;
+    font-size: 13px;
+    font-weight: 600;
+    color: #c4b5fd;
+    cursor: pointer;
+    background: rgba(124, 92, 252, 0.1);
+    user-select: none;
+    transition: background 0.15s;
+}
+
+.observability-details summary:hover {
+    background: rgba(124, 92, 252, 0.2);
+}
+
+.trace-step {
+    padding: 12px;
+    border-top: 1px solid rgba(124, 92, 252, 0.2);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.trace-step-title {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.trace-step-content {
+    font-size: 12px;
+    color: var(--text-primary);
+    line-height: 1.5;
+}
+
+.kb-chunk {
+    margin-top: 6px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg-secondary);
+}
+
+.kb-chunk summary {
+    padding: 6px 10px;
+    font-size: 11px;
+    color: var(--text-secondary);
+    background: transparent;
+}
+
+.kb-chunk-text {
+    padding: 8px 10px;
+    font-size: 11px;
+    color: var(--text-muted);
+    border-top: 1px solid var(--border);
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.llm-reasoning {
+    padding: 8px;
+    background: rgba(255, 255, 255, 0.05);
+    border-left: 3px solid var(--text-muted);
+    font-style: italic;
+    color: var(--text-secondary);
+}
+
+
+/* Citation Markers */
+.citation-marker {
+    color: var(--accent);
+    font-weight: bold;
+    font-size: 0.8em;
+    margin-left: 2px;
+    cursor: pointer;
+}
+
