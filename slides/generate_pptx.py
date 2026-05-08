@@ -137,8 +137,8 @@ def slide_title(prs):
              "RAG + Tool Calling + Memory", font_size=22, color=BRAND_ORANGE)
 
     add_multiline(slide, Inches(1), Inches(4.7), Inches(10), Inches(2.5), [
-        "Le Hoang Trung Kien  •  Tran Dinh Bao Long  •  Nguyen Duc Chinh",
-        "Nguyen Huu Dinh  •  Truong Thi My Quyen  •  Tran Van Duc  •  Hoang Trong Tan",
+        "Le Hoang Trung Kien  •  Tran Dinh Bao Long  •  Nguyen Duc Chinh  •  Nguyen Huu Dinh",
+        "Truong Thi My Quyen  •  Tran Van Duc  •  Hoang Trong Tan  •  Le Duy Khanh",
         "",
         "Mentor: Anh Quang Phung (QA Lead, TechX)",
         "LLM: DeepSeek V3.2 via Amazon Bedrock  •  Framework: Bedrock Agents",

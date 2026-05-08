@@ -5,7 +5,7 @@
 | Field | Value |
 |-------|-------|
 | **Group** | Group 9 |
-| **Members** | 1. Lê Hoàng Trung Kiên<br>2. Trần Đình Bảo Long<br>3. Nguyễn Đức Chinh<br>4. Nguyễn Hữu Định<br>5. Trương Thị Mỹ Quyên<br>6. Trần Văn Đức<br>7.Hoàng Trọng Tấn
+| **Members** | 1. Lê Hoàng Trung Kiên<br>2. Trần Đình Bảo Long<br>3. Nguyễn Đức Chinh<br>4. Nguyễn Hữu Định<br>5. Trương Thị Mỹ Quyên<br>6. Trần Văn Đức<br>7. Hoàng Trọng Tấn<br>8. Lê Duy Khánh
 | **Mentor** | Anh Quang Phùng (Quality Assurance Lead, TechX) |
 | **LLM** | DeepSeek V3.2 via Amazon Bedrock |
 | **Framework** | Amazon Bedrock Agents (managed orchestration) |
@@ -31,9 +31,9 @@
 
 ![Tool Routing](./diagrams/w4_tool_routing.png)
 
-### Running system
+### Running System
 
-> See `screenshots/running-system.png`
+**Live URL:** https://d1alut1mvmxglj.cloudfront.net/
 
 ![Running System](./screenshots/running-system.png)
 
@@ -71,12 +71,6 @@
 - Lambda Chat runs **outside VPC** (no `vpc_config`) — calls Bedrock API directly via AWS internal network
 - Action Group Lambda runs **inside VPC** — reaches RDS directly, reaches Monitoring API via VPC Interface Endpoint (`com.amazonaws.us-east-1.execute-api`)
 - **No NAT Gateway** needed — all external calls use VPC endpoints or run outside VPC
-
-### System Running
-
-**Live URL:** https://d1alut1mvmxglj.cloudfront.net/
-
-![System Running](./screenshots/system_running.png)
 
 ---
 
