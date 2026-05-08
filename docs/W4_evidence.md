@@ -275,3 +275,9 @@ terraform apply   # ~15 min for full stack
 | `database` | RDS PostgreSQL, seed Lambda |
 | `network` | VPC, 2 public + 2 private subnets, SGs, VPC Interface Endpoint (execute-api) |
 | `frontend` | S3 bucket, CloudFront distribution |
+
+---
+
+## Appendix — Presentation Slides
+
+[W4_presentation.pptx](../slides/W4_presentation.pptx)
