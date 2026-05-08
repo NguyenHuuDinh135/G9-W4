@@ -31,6 +31,12 @@
 
 ![Tool Routing](./diagrams/w4_tool_routing.png)
 
+### Running system
+
+> See `screenshots/running-system.png`
+
+![Running System](./screenshots/running-system.png)
+
 ### Component List
 
 | Component | Scope | Role |
