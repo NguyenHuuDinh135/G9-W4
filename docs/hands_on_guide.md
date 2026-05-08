@@ -1,6 +1,6 @@
 # Hands-on Guide — GeekBrain AI Assistant (W4)
 
-Hướng dẫn từng bước **thủ công** trên AWS Console + CLI — không dùng Terraform.
+Hướng dẫn từng bước **thủ công trên AWS Console** — không dùng Terraform, không CLI.
 Dành cho thành viên muốn hiểu rõ từng thành phần hoặc tái tạo hệ thống từ đầu.
 
 > Thứ tự thực hiện rất quan trọng — các bước sau phụ thuộc bước trước.
@@ -14,7 +14,7 @@ Dành cho thành viên muốn hiểu rõ từng thành phần hoặc tái tạo 
 3. [Bước 2 — Tạo RDS PostgreSQL](#bước-2--tạo-rds-postgresql)
 4. [Bước 3 — Seed Data vào Database](#bước-3--seed-data-vào-database)
 5. [Bước 4 — Deploy Monitoring API](#bước-4--deploy-monitoring-api)
-6. [Bước 5 — Tạo Knowledge Base (OpenSearch + Bedrock KB)](#bước-5--tạo-knowledge-base)
+6. [Bước 5 — Tạo Knowledge Base](#bước-5--tạo-knowledge-base)
 7. [Bước 6 — Tạo Action Group Lambda](#bước-6--tạo-action-group-lambda)
 8. [Bước 7 — Tạo Bedrock Agent](#bước-7--tạo-bedrock-agent)
 9. [Bước 8 — Tạo Lambda Chat + API Gateway](#bước-8--tạo-lambda-chat--api-gateway)
@@ -27,16 +27,11 @@ Dành cho thành viên muốn hiểu rõ từng thành phần hoặc tái tạo 
 ## 1. Prerequisites
 
 - AWS Account với quyền Admin
-- AWS CLI v2 đã configure (`aws configure` → region `us-east-1`)
-- Python 3.12 + pip
+- Python 3.12 cài trên máy local (để build Lambda zip)
 - Bật model access trên Bedrock Console:
-  - Amazon Titan Embed Text v2
-  - DeepSeek V3.2
-
-```bash
-# Verify AWS CLI
-aws sts get-caller-identity
-```
+  - Vào **Amazon Bedrock** → **Model access** → Request access cho:
+    - Amazon Titan Embed Text v2
+    - DeepSeek V3.2
 
 ---
 
@@ -44,234 +39,218 @@ aws sts get-caller-identity
 
 ### 1.1 Tạo VPC
 
-```bash
-VPC_ID=$(aws ec2 create-vpc --cidr-block 10.0.0.0/16 \
-  --query 'Vpc.VpcId' --output text)
-aws ec2 modify-vpc-attribute --vpc-id $VPC_ID --enable-dns-support
-aws ec2 modify-vpc-attribute --vpc-id $VPC_ID --enable-dns-hostnames
-aws ec2 create-tags --resources $VPC_ID --tags Key=Name,Value=geekbrain-vpc
-echo "VPC: $VPC_ID"
-```
+1. Vào **VPC Console** → **Your VPCs** → **Create VPC**
+2. Cấu hình:
+   - Name: `geekbrain-vpc`
+   - IPv4 CIDR: `10.0.0.0/16`
+   - DNS hostnames: **Enable**
+   - DNS resolution: **Enable**
+3. Click **Create VPC**
 
-### 1.2 Tạo Subnets
+### 1.2 Tạo Private Subnets
 
-```bash
-# Private Subnet 1 (us-east-1a)
-PRIV_SUB_1=$(aws ec2 create-subnet --vpc-id $VPC_ID \
-  --cidr-block 10.0.10.0/24 --availability-zone us-east-1a \
-  --query 'Subnet.SubnetId' --output text)
+**Subnet 1:**
+1. VPC Console → **Subnets** → **Create subnet**
+2. VPC: `geekbrain-vpc`
+3. Name: `geekbrain-private-1`
+4. AZ: `us-east-1a`
+5. CIDR: `10.0.10.0/24`
 
-# Private Subnet 2 (us-east-1b)
-PRIV_SUB_2=$(aws ec2 create-subnet --vpc-id $VPC_ID \
-  --cidr-block 10.0.11.0/24 --availability-zone us-east-1b \
-  --query 'Subnet.SubnetId' --output text)
+**Subnet 2:**
+1. Create subnet
+2. VPC: `geekbrain-vpc`
+3. Name: `geekbrain-private-2`
+4. AZ: `us-east-1b`
+5. CIDR: `10.0.11.0/24`
 
-echo "Private subnets: $PRIV_SUB_1, $PRIV_SUB_2"
-```
+### 1.3 Tạo Security Groups
 
-### 1.3 Security Groups
+**Lambda SG:**
+1. VPC Console → **Security Groups** → **Create security group**
+2. Name: `geekbrain-lambda-sg`
+3. VPC: `geekbrain-vpc`
+4. Outbound rules: All traffic → `0.0.0.0/0` (default)
+5. Inbound: không cần
 
-```bash
-# Lambda Security Group
-LAMBDA_SG=$(aws ec2 create-security-group --group-name geekbrain-lambda-sg \
-  --description "Lambda functions" --vpc-id $VPC_ID \
-  --query 'GroupId' --output text)
-aws ec2 authorize-security-group-egress --group-id $LAMBDA_SG \
-  --protocol -1 --cidr 0.0.0.0/0
+**RDS SG:**
+1. Create security group
+2. Name: `geekbrain-rds-sg`
+3. VPC: `geekbrain-vpc`
+4. Inbound rules: **Add rule**
+   - Type: PostgreSQL (port 5432)
+   - Source: `geekbrain-lambda-sg` (chọn security group)
+5. Outbound: All traffic (default)
 
-# RDS Security Group
-RDS_SG=$(aws ec2 create-security-group --group-name geekbrain-rds-sg \
-  --description "RDS PostgreSQL" --vpc-id $VPC_ID \
-  --query 'GroupId' --output text)
-aws ec2 authorize-security-group-ingress --group-id $RDS_SG \
-  --protocol tcp --port 5432 --source-group $LAMBDA_SG
+**Endpoint SG:**
+1. Create security group
+2. Name: `geekbrain-endpoint-sg`
+3. VPC: `geekbrain-vpc`
+4. Inbound rules: **Add rule**
+   - Type: HTTPS (port 443)
+   - Source: `geekbrain-lambda-sg`
+5. Outbound: All traffic (default)
 
-# VPC Endpoint Security Group
-ENDPOINT_SG=$(aws ec2 create-security-group --group-name geekbrain-endpoint-sg \
-  --description "VPC Interface Endpoints" --vpc-id $VPC_ID \
-  --query 'GroupId' --output text)
-aws ec2 authorize-security-group-ingress --group-id $ENDPOINT_SG \
-  --protocol tcp --port 443 --source-group $LAMBDA_SG
+### 1.4 Tạo VPC Interface Endpoint
 
-echo "SGs: Lambda=$LAMBDA_SG, RDS=$RDS_SG, Endpoint=$ENDPOINT_SG"
-```
+1. VPC Console → **Endpoints** → **Create endpoint**
+2. Name: `geekbrain-apigw-endpoint`
+3. Service: tìm `com.amazonaws.us-east-1.execute-api`
+4. VPC: `geekbrain-vpc`
+5. Subnets: tick cả `geekbrain-private-1` và `geekbrain-private-2`
+6. Security group: `geekbrain-endpoint-sg`
+7. ✅ **Enable DNS name** (quan trọng!)
+8. Create endpoint
 
-### 1.4 VPC Interface Endpoint (cho API Gateway)
-
-```bash
-ENDPOINT_ID=$(aws ec2 create-vpc-endpoint \
-  --vpc-id $VPC_ID \
-  --vpc-endpoint-type Interface \
-  --service-name com.amazonaws.us-east-1.execute-api \
-  --subnet-ids $PRIV_SUB_1 $PRIV_SUB_2 \
-  --security-group-ids $ENDPOINT_SG \
-  --private-dns-enabled \
-  --query 'VpcEndpoint.VpcEndpointId' --output text)
-echo "VPC Endpoint: $ENDPOINT_ID"
-```
-
-> **Tại sao?** Action Group Lambda trong VPC cần gọi Monitoring API (qua API Gateway). VPC Endpoint cho phép gọi mà không cần NAT Gateway.
+> **Tại sao?** Action Group Lambda trong VPC cần gọi Monitoring API (qua API Gateway). Endpoint này cho phép gọi API Gateway mà không cần NAT Gateway — tiết kiệm ~$32/tháng.
 
 ---
 
 ## Bước 2 — Tạo RDS PostgreSQL
 
-### 2.1 Tạo Subnet Group
+1. Vào **RDS Console** → **Create database**
+2. Method: Standard create
+3. Engine: **PostgreSQL** version 15
+4. Template: **Free tier**
+5. Settings:
+   - DB instance identifier: `geekbrain-postgres`
+   - Master username: `postgres`
+   - Password: tự đặt (ghi lại!)
+6. Instance: `db.t3.micro`
+7. Storage: 20 GB gp2
+8. Connectivity:
+   - VPC: `geekbrain-vpc`
+   - Subnet group: Create new → chọn 2 private subnets
+   - Public access: **No**
+   - Security group: chọn `geekbrain-rds-sg`
+9. Database name: `geekbrain`
+10. Create database
 
-```bash
-aws rds create-db-subnet-group \
-  --db-subnet-group-name geekbrain-db-subnet \
-  --db-subnet-group-description "GeekBrain private subnets" \
-  --subnet-ids $PRIV_SUB_1 $PRIV_SUB_2
-```
+**Đợi 5-8 phút** cho status = Available.
 
-### 2.2 Tạo RDS Instance
-
-```bash
-DB_PASSWORD="YourSecurePassword123!"  # Thay bằng password mạnh
-
-aws rds create-db-instance \
-  --db-instance-identifier geekbrain-postgres \
-  --db-instance-class db.t3.micro \
-  --engine postgres \
-  --engine-version 15 \
-  --allocated-storage 20 \
-  --db-name geekbrain \
-  --master-username postgres \
-  --master-user-password "$DB_PASSWORD" \
-  --vpc-security-group-ids $RDS_SG \
-  --db-subnet-group-name geekbrain-db-subnet \
-  --no-publicly-accessible \
-  --no-multi-az
-```
-
-Đợi ~5-8 phút:
-```bash
-aws rds wait db-instance-available --db-instance-identifier geekbrain-postgres
-DB_HOST=$(aws rds describe-db-instances --db-instance-identifier geekbrain-postgres \
-  --query 'DBInstances[0].Endpoint.Address' --output text)
-echo "DB Host: $DB_HOST"
-```
+📝 **Ghi lại:** Endpoint address (dạng `geekbrain-postgres.xxxxxxxx.us-east-1.rds.amazonaws.com`)
 
 ---
 
 ## Bước 3 — Seed Data vào Database
 
-### 3.1 Build Seed Lambda
+### 3.1 Build Seed Lambda trên máy local
 
 ```bash
 cd seed_lambda
 python build.py
-cd ..
 ```
 
-### 3.2 Tạo IAM Role
+Kết quả: thư mục `seed_lambda/.build/` chứa code + data + dependencies.
 
-```bash
-aws iam create-role --role-name geekbrain-seed-lambda-role \
-  --assume-role-policy-document '{
-    "Version": "2012-10-17",
-    "Statement": [{"Effect": "Allow", "Principal": {"Service": "lambda.amazonaws.com"}, "Action": "sts:AssumeRole"}]
-  }'
-
-aws iam attach-role-policy --role-name geekbrain-seed-lambda-role \
-  --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
-```
-
-### 3.3 Zip & Deploy Lambda
+### 3.2 Zip file
 
 ```bash
 cd seed_lambda/.build
 zip -r ../../seed_lambda.zip .
 cd ../..
-
-ROLE_ARN=$(aws iam get-role --role-name geekbrain-seed-lambda-role --query 'Role.Arn' --output text)
-
-# Đợi role propagate
-sleep 10
-
-aws lambda create-function \
-  --function-name geekbrain-seed-db \
-  --runtime python3.12 \
-  --handler handler.handler \
-  --role $ROLE_ARN \
-  --zip-file fileb://seed_lambda.zip \
-  --timeout 120 \
-  --memory-size 256 \
-  --vpc-config SubnetIds=$PRIV_SUB_1,$PRIV_SUB_2,SecurityGroupIds=$LAMBDA_SG \
-  --environment "Variables={DB_HOST=$DB_HOST,DB_NAME=geekbrain,DB_USER=postgres,DB_PASSWORD=$DB_PASSWORD}"
 ```
 
-### 3.4 Invoke Seed
+### 3.3 Tạo IAM Role trên Console
 
-```bash
-aws lambda invoke --function-name geekbrain-seed-db response.json
-cat response.json
-```
+1. **IAM Console** → **Roles** → **Create role**
+2. Trusted entity: **Lambda**
+3. Attach policy: `AWSLambdaVPCAccessExecutionRole`
+4. Role name: `geekbrain-seed-lambda-role`
+5. Create role
 
-Phải thấy: tables created + rows inserted (monthly_costs, incidents, sla_targets, daily_metrics).
+### 3.4 Tạo Lambda Function
+
+1. **Lambda Console** → **Create function**
+2. Name: `geekbrain-seed-db`
+3. Runtime: Python 3.12
+4. Execution role: `geekbrain-seed-lambda-role`
+5. Click **Create function**
+
+Sau khi tạo:
+
+6. **Code** tab → Upload from → `.zip file` → upload `seed_lambda.zip`
+7. **Configuration** tab:
+   - General: Timeout = **2 minutes**, Memory = 256 MB
+   - VPC: chọn `geekbrain-vpc`, 2 private subnets, security group `geekbrain-lambda-sg`
+   - Environment variables:
+     - `DB_HOST` = `geekbrain-postgres.xxxxxxxx.us-east-1.rds.amazonaws.com`
+     - `DB_NAME` = `geekbrain`
+     - `DB_USER` = `postgres`
+     - `DB_PASSWORD` = (password bạn đặt ở bước 2)
+8. Runtime settings: Handler = `handler.handler`
+
+### 3.5 Invoke
+
+1. Tab **Test** → Create test event (nội dung: `{}`)
+2. Click **Test**
+3. Phải thấy log: "Creating tables...", "Inserted X rows"
 
 ---
 
 ## Bước 4 — Deploy Monitoring API
 
-### 4.1 Build
+### 4.1 Build trên local
 
 ```bash
 cd monitoring_lambda
 python build.py
-cd ..
-```
-
-### 4.2 Tạo Role + Deploy Lambda
-
-```bash
-aws iam create-role --role-name geekbrain-monitoring-role \
-  --assume-role-policy-document '{
-    "Version": "2012-10-17",
-    "Statement": [{"Effect": "Allow", "Principal": {"Service": "lambda.amazonaws.com"}, "Action": "sts:AssumeRole"}]
-  }'
-aws iam attach-role-policy --role-name geekbrain-monitoring-role \
-  --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-
-sleep 10
-
-cd monitoring_lambda/.build
+cd .build
 zip -r ../../monitoring_lambda.zip .
 cd ../..
-
-MON_ROLE_ARN=$(aws iam get-role --role-name geekbrain-monitoring-role --query 'Role.Arn' --output text)
-
-aws lambda create-function \
-  --function-name geekbrain-monitoring-api \
-  --runtime python3.12 \
-  --handler handler.handler \
-  --role $MON_ROLE_ARN \
-  --zip-file fileb://monitoring_lambda.zip \
-  --timeout 30 \
-  --memory-size 256
 ```
 
-### 4.3 Tạo API Gateway cho Monitoring
+### 4.2 Tạo IAM Role
 
-1. AWS Console → API Gateway → Create API → REST API
+1. IAM → Roles → Create role
+2. Trusted entity: Lambda
+3. Attach policy: `AWSLambdaBasicExecutionRole`
+4. Role name: `geekbrain-monitoring-role`
+
+### 4.3 Tạo Lambda
+
+1. Lambda Console → Create function
 2. Name: `geekbrain-monitoring-api`
-3. Tạo resource `/{proxy+}` với method `ANY` → Integration: Lambda Proxy → function `geekbrain-monitoring-api`
-4. Deploy to stage `prod`
-5. Lưu URL: `https://xxxxxxxx.execute-api.us-east-1.amazonaws.com/prod`
+3. Runtime: Python 3.12
+4. Role: `geekbrain-monitoring-role`
+5. Create → Upload zip `monitoring_lambda.zip`
+6. Configuration:
+   - Timeout: 30s, Memory: 256 MB
+   - **KHÔNG cần VPC** (monitoring API không cần connect RDS trực tiếp)
+7. Runtime settings: Handler = `handler.handler`
 
-```bash
-MONITORING_API_URL="https://xxxxxxxx.execute-api.us-east-1.amazonaws.com/prod"
-```
+### 4.4 Tạo API Gateway
 
-### 4.4 Test
+1. **API Gateway Console** → Create API → **REST API** → Build
+2. API name: `geekbrain-monitoring-api`
+3. Create API
 
-```bash
-curl $MONITORING_API_URL/services
-curl $MONITORING_API_URL/metrics/PaymentGW
-curl $MONITORING_API_URL/status/PaymentGW
-curl $MONITORING_API_URL/incidents/PaymentGW
-```
+**Tạo proxy resource:**
+
+4. Resources → Actions → **Create Resource**
+   - ✅ Configure as proxy resource
+   - Resource path: `/{proxy+}`
+   - Click Create Resource
+5. Setup method ANY:
+   - Integration type: Lambda Function Proxy
+   - Lambda Function: `geekbrain-monitoring-api`
+   - Save → OK (add permission)
+
+**Tạo root GET (cho `/services` endpoint):**
+
+6. Click `/` root → Actions → Create Method → `ANY`
+   - Integration: Lambda Function Proxy → `geekbrain-monitoring-api`
+
+**Deploy:**
+
+7. Actions → **Deploy API**
+   - Stage: New Stage → name: `prod`
+   - Deploy
+
+📝 **Ghi lại Invoke URL:** `https://xxxxxxxx.execute-api.us-east-1.amazonaws.com/prod`
+
+**Test trong browser:**
+- Mở: `https://xxxxxxxx.execute-api.us-east-1.amazonaws.com/prod/services`
+- Phải thấy: `["PaymentGW","OrderSvc","AuthSvc","NotificationSvc","ReportingSvc","FraudDetector"]`
 
 ---
 
@@ -279,80 +258,51 @@ curl $MONITORING_API_URL/incidents/PaymentGW
 
 ### 5.1 Upload docs lên S3
 
-```bash
-ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-BUCKET="geekbrain-kb-docs-${ACCOUNT_ID}"
+1. **S3 Console** → Create bucket
+   - Name: `geekbrain-kb-docs-<account-id>`
+   - Region: us-east-1
+   - Create bucket
+2. Mở bucket → **Upload**
+3. Upload tất cả 36 file `.md` từ `data_package/knowledge_base/`
 
-aws s3 mb s3://$BUCKET
-aws s3 sync data_package/knowledge_base/ s3://$BUCKET/ --exclude "*.metadata.json"
-```
+### 5.2 Tạo Bedrock Knowledge Base
 
-### 5.2 Tạo OpenSearch Serverless Collection
-
-1. AWS Console → OpenSearch Service → Serverless → Collections
-2. Create Collection:
-   - Name: `geekbrain-kb`
-   - Type: **Vector search**
-   - Encryption: AWS-owned key
-   - Network: Public
-3. Đợi status = `ACTIVE` (~2 phút)
-4. Lưu Collection endpoint: `https://xxxxxxxx.us-east-1.aoss.amazonaws.com`
-
-### 5.3 Tạo Vector Index
-
-Vào OpenSearch Dashboard (link trong collection) → Dev Tools:
-
-```json
-PUT bedrock-knowledge-base-default-index
-{
-  "settings": {
-    "index.knn": true,
-    "number_of_shards": 2,
-    "number_of_replicas": 0,
-    "index.knn.algo_param.ef_search": 512
-  },
-  "mappings": {
-    "properties": {
-      "bedrock-knowledge-base-default-vector": {
-        "type": "knn_vector",
-        "dimension": 1024,
-        "method": {
-          "name": "hnsw",
-          "engine": "faiss",
-          "space_type": "l2",
-          "parameters": {
-            "ef_construction": 512,
-            "m": 16
-          }
-        }
-      },
-      "AMAZON_BEDROCK_METADATA": { "type": "text", "index": false },
-      "AMAZON_BEDROCK_TEXT_CHUNK": { "type": "text" }
-    }
-  }
-}
-```
-
-### 5.4 Tạo Bedrock Knowledge Base
-
-1. AWS Console → Bedrock → Knowledge Bases → Create
+1. **Bedrock Console** → **Knowledge bases** → **Create knowledge base**
 2. Name: `geekbrain-knowledge-base`
-3. Data source: S3 → bucket `geekbrain-kb-docs-xxxxx`
-4. Embedding model: **Amazon Titan Embed Text v2**
-5. Vector store: OpenSearch Serverless → collection `geekbrain-kb`
-   - Index name: `bedrock-knowledge-base-default-index`
+3. IAM: Create and use a new service role
+4. **Data source:**
+   - Type: S3
+   - Bucket: `geekbrain-kb-docs-xxxxx`
+   - Chọn toàn bộ bucket
+5. **Embedding model:** Amazon Titan Embed Text v2
+6. **Vector store:** Quick create (tự tạo OpenSearch Serverless)
+
+   Hoặc nếu muốn custom:
+   - Chọn OpenSearch Serverless
+   - Tạo collection mới tên `geekbrain-kb` (type: Vector search)
+   - Index: `bedrock-knowledge-base-default-index`
    - Vector field: `bedrock-knowledge-base-default-vector`
    - Text field: `AMAZON_BEDROCK_TEXT_CHUNK`
-   - Metadata field: `AMAZON_BEDROCK_METADATA`
-6. Chunking: **Hierarchical**
-   - Parent: 1500 tokens
-   - Child: 300 tokens
-   - Overlap: 60 tokens
-7. Create → **Sync** (đợi 3-5 phút)
+   - Metadata: `AMAZON_BEDROCK_METADATA`
 
-```bash
-KB_ID="<knowledge-base-id-from-console>"
-```
+7. **Chunking strategy:** Hierarchical
+   - Parent max tokens: **1500**
+   - Child max tokens: **300**
+   - Overlap tokens: **60**
+8. **Create knowledge base**
+
+### 5.3 Sync Knowledge Base
+
+1. Vào KB vừa tạo → Data source → Click **Sync**
+2. Đợi 3-5 phút → Status: `Available`
+
+📝 **Ghi lại:** Knowledge Base ID (dạng `XXXXXXXXXX`)
+
+### 5.4 Test KB
+
+1. Trong KB Console → tab **Test**
+2. Hỏi: "Who leads Team Platform?"
+3. Phải trả về chunks từ `team_platform.md`
 
 ---
 
@@ -363,62 +313,56 @@ KB_ID="<knowledge-base-id-from-console>"
 ```bash
 cd lambda
 python build.py
-cd ..
-```
-
-### 6.2 Deploy
-
-```bash
-aws iam create-role --role-name geekbrain-action-group-role \
-  --assume-role-policy-document '{
-    "Version": "2012-10-17",
-    "Statement": [{"Effect": "Allow", "Principal": {"Service": "lambda.amazonaws.com"}, "Action": "sts:AssumeRole"}]
-  }'
-aws iam attach-role-policy --role-name geekbrain-action-group-role \
-  --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
-
-sleep 10
-
-cd lambda/.build
+cd .build
 zip -r ../../action_group.zip .
 cd ../..
-
-AG_ROLE_ARN=$(aws iam get-role --role-name geekbrain-action-group-role --query 'Role.Arn' --output text)
-
-aws lambda create-function \
-  --function-name geekbrain-action-group \
-  --runtime python3.12 \
-  --handler action_group_function.handler \
-  --role $AG_ROLE_ARN \
-  --zip-file fileb://action_group.zip \
-  --timeout 30 \
-  --memory-size 256 \
-  --vpc-config SubnetIds=$PRIV_SUB_1,$PRIV_SUB_2,SecurityGroupIds=$LAMBDA_SG \
-  --environment "Variables={MONITORING_API_URL=$MONITORING_API_URL,DB_HOST=$DB_HOST,DB_NAME=geekbrain,DB_USER=postgres,DB_PASSWORD=$DB_PASSWORD}"
 ```
 
-### 6.3 Cho phép Bedrock invoke
+### 6.2 Tạo IAM Role
 
-```bash
-AG_ARN=$(aws lambda get-function --function-name geekbrain-action-group --query 'Configuration.FunctionArn' --output text)
+1. IAM → Roles → Create role → Lambda
+2. Attach policy: `AWSLambdaVPCAccessExecutionRole`
+3. Role name: `geekbrain-action-group-role`
 
-aws lambda add-permission \
-  --function-name geekbrain-action-group \
-  --statement-id AllowBedrockInvoke \
-  --action lambda:InvokeFunction \
-  --principal bedrock.amazonaws.com
-```
+### 6.3 Tạo Lambda
+
+1. Lambda → Create function
+2. Name: `geekbrain-action-group`
+3. Runtime: Python 3.12
+4. Role: `geekbrain-action-group-role`
+5. Create → Upload zip `action_group.zip`
+6. Configuration:
+   - Timeout: **30s**, Memory: 256 MB
+   - **VPC:** `geekbrain-vpc`, 2 private subnets, SG: `geekbrain-lambda-sg`
+   - Environment variables:
+     - `MONITORING_API_URL` = `https://xxxxxxxx.execute-api.us-east-1.amazonaws.com/prod`
+     - `DB_HOST` = `geekbrain-postgres.xxxxxxxx.us-east-1.rds.amazonaws.com`
+     - `DB_NAME` = `geekbrain`
+     - `DB_USER` = `postgres`
+     - `DB_PASSWORD` = (password RDS)
+7. Runtime settings: Handler = `action_group_function.handler`
+
+### 6.4 Add resource-based policy (cho Bedrock invoke)
+
+1. Lambda → `geekbrain-action-group` → **Configuration** → **Permissions**
+2. Scroll xuống **Resource-based policy statements** → **Add permissions**
+3. Choose: AWS service → Service: `Other`
+   - Statement ID: `AllowBedrockInvoke`
+   - Principal: `bedrock.amazonaws.com`
+   - Action: `lambda:InvokeFunction`
+4. Save
 
 ---
 
 ## Bước 7 — Tạo Bedrock Agent
 
-### 7.1 Tạo Agent trên Console
+### 7.1 Create Agent
 
-1. AWS Console → Bedrock → Agents → Create Agent
-2. Name: `geekbrain-agent`
-3. Model: **DeepSeek V3.2** (hoặc cross-region inference profile)
-4. Instructions — paste toàn bộ nội dung sau:
+1. **Bedrock Console** → **Agents** → **Create Agent**
+2. Agent name: `geekbrain-agent`
+3. Agent description: "GeekBrain AI Assistant"
+4. Model: **DeepSeek V3.2** (tìm trong dropdown hoặc chọn cross-region inference)
+5. Instructions — paste:
 
 ```
 You are GeekBrain AI Assistant. You answer questions about GeekBrain — a fintech startup in Ho Chi Minh City running six production services: PaymentGW, AuthSvc, OrderSvc, FraudDetector, NotificationSvc, ReportingSvc.
@@ -444,124 +388,220 @@ DATABASE SCHEMA (for query_database tool):
 AVAILABLE SERVICES: PaymentGW, AuthSvc, OrderSvc, FraudDetector, NotificationSvc, ReportingSvc
 ```
 
-5. Session timeout: **1800 seconds**
+6. Session timeout: **1800 seconds** (30 phút)
+7. Create Agent
 
-### 7.2 Associate Knowledge Base
+### 7.2 Add Knowledge Base
 
-- Add Knowledge Base → chọn `geekbrain-knowledge-base`
-- State: Enabled
+1. Trong Agent → **Knowledge bases** → **Add**
+2. Chọn `geekbrain-knowledge-base`
+3. State: Enabled
+4. Save
 
 ### 7.3 Add Action Group
 
-- Name: `geekbrain-tools`
-- Lambda: `geekbrain-action-group`
-- Define functions (6 tools):
+1. Trong Agent → **Action groups** → **Add**
+2. Name: `geekbrain-tools`
+3. Action group type: **Define with function details**
+4. Lambda function: `geekbrain-action-group`
 
-**Tool 1: query_database**
-- Description: `Execute a SQL SELECT query on GeekBrain's database containing HISTORICAL data. Tables: monthly_costs, incidents, sla_targets, daily_metrics. USE THIS for: past costs, historical trends, SLA targets, incident records. DO NOT use for current/live data.`
-- Parameter: `sql_query` (string, required) — "SQL SELECT query to execute."
+**Thêm 6 functions:**
 
-**Tool 2: get_service_status**
-- Description: `Get the CURRENT operational status of ONE specific service. Returns: status, uptime, active_alerts, last_incident. USE THIS for: "Is X running?", "What is the status of X?"`
-- Parameter: `service_name` (string, required) — "Exact service name: PaymentGW, AuthSvc, OrderSvc, FraudDetector, NotificationSvc, or ReportingSvc"
+---
 
-**Tool 3: get_service_metrics**
-- Description: `Get CURRENT LIVE performance metrics for ONE specific service. Returns: latency_ms (p50/p95/p99), error_rate_percent, requests_per_minute, cpu/memory utilization. USE THIS for: "What is X's current latency?", "How many requests does X handle?"`
-- Parameter: `service_name` (string, required)
+**Function 1: `query_database`**
 
-**Tool 4: list_services**
-- Description: `List all 6 monitored services in the GeekBrain system.`
-- No parameters
-
-**Tool 5: get_incident_history**
-- Description: `Get historical incident records from monitoring system. USE THIS for: "What incidents happened to X?", "Show recent incidents"`
-- Parameter: `service_name` (string, required) — "Service name or 'all'"
-
-**Tool 6: compare_services**
-- Description: `Rank ALL 6 services by a single metric (highest to lowest). Available metrics: latency_p99, error_rate, requests_per_minute, cpu_utilization_percent, memory_utilization_percent. USE THIS for: "Which service has the highest X?"`
-- Parameter: `metric` (string, required)
-
-### 7.4 Prepare & Create Alias
-
-1. Click **Prepare**
-2. Đợi status = Prepared
-3. Create Alias: name = `prod`
-4. Lưu Agent ID và Alias ID:
-
-```bash
-AGENT_ID="<agent-id>"
-AGENT_ALIAS_ID="<alias-id>"
+Description:
 ```
+Execute a SQL SELECT query on GeekBrain's database containing HISTORICAL data. Tables: monthly_costs (service, month, compute_cost, storage_cost, network_cost, third_party_cost, total_cost), incidents (incident_id, service, date, severity, duration_minutes, root_cause, resolution, team_responsible, reported_by), sla_targets (service, metric, target, measurement_window), daily_metrics (date, service, latency_p99_ms, error_rate_percent, requests_per_minute, availability_percent). USE THIS for: past costs, historical trends, SLA targets, incident records, daily metrics history. DO NOT use for current/live/real-time data.
+```
+
+Parameters:
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| sql_query | string | Yes | SQL SELECT query to execute. Only SELECT queries allowed. |
+
+---
+
+**Function 2: `get_service_status`**
+
+Description:
+```
+Get the CURRENT operational status of ONE specific service. Returns: status (healthy/degraded/down), uptime_30d, uptime_90d, active_alerts count, last_incident ID. USE THIS for: "Is X running?", "What is the status of X?", "Is X healthy?", "Any alerts on X?"
+```
+
+Parameters:
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| service_name | string | Yes | Exact service name: PaymentGW, AuthSvc, OrderSvc, FraudDetector, NotificationSvc, or ReportingSvc |
+
+---
+
+**Function 3: `get_service_metrics`**
+
+Description:
+```
+Get CURRENT LIVE performance metrics for ONE specific service. Returns: latency_ms (p50/p95/p99), error_rate_percent, requests_per_minute, cpu_utilization_percent, memory_utilization_percent. USE THIS for: "What is X's current latency?", "How many requests does X handle?", "What is X's error rate right now?"
+```
+
+Parameters:
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| service_name | string | Yes | Exact service name: PaymentGW, AuthSvc, OrderSvc, FraudDetector, NotificationSvc, or ReportingSvc |
+
+---
+
+**Function 4: `list_services`**
+
+Description:
+```
+List all 6 monitored services in the GeekBrain system. Use when you need to know available service names.
+```
+
+Parameters: (none)
+
+---
+
+**Function 5: `get_incident_history`**
+
+Description:
+```
+Get historical incident records from the monitoring system for a specific service or all services. Returns: incident_id, service, date, severity, duration_minutes, root_cause, resolution. USE THIS for: "What incidents happened to X?", "Show recent incidents", "What was the root cause of INC-005?"
+```
+
+Parameters:
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| service_name | string | Yes | Service name to filter incidents, or 'all' for all services |
+
+---
+
+**Function 6: `compare_services`**
+
+Description:
+```
+Rank ALL 6 services by a single metric and return them sorted highest-to-lowest. Available metrics: latency_p99, error_rate, requests_per_minute, cpu_utilization_percent, memory_utilization_percent. USE THIS for: "Which service has the highest X?", "Rank services by Y", "Compare all services on Z".
+```
+
+Parameters:
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| metric | string | Yes | Metric to compare: latency_p99, error_rate, requests_per_minute, cpu_utilization_percent, memory_utilization_percent |
+
+---
+
+5. Save Action Group
+
+### 7.4 Prepare & Alias
+
+1. Click **Prepare** (góc trên phải)
+2. Đợi status = `Prepared`
+3. Tab **Aliases** → **Create alias**
+   - Name: `prod`
+   - Associate with version: chọn phiên bản mới nhất
+4. Create alias
+
+📝 **Ghi lại:**
+- Agent ID (dạng `ABCDEFGHIJ`)
+- Alias ID (dạng `XXXXXXXXXX`)
+
+### 7.5 Test Agent
+
+1. Trong Agent Console → panel **Test** bên phải
+2. Hỏi: "Who leads Team Platform?"
+3. Phải trả lời đúng + cite source
 
 ---
 
 ## Bước 8 — Tạo Lambda Chat + API Gateway
 
-### 8.1 Deploy Lambda Chat
+### 8.1 Tạo IAM Role
 
-```bash
-aws iam create-role --role-name geekbrain-chat-lambda-role \
-  --assume-role-policy-document '{
-    "Version": "2012-10-17",
-    "Statement": [{"Effect": "Allow", "Principal": {"Service": "lambda.amazonaws.com"}, "Action": "sts:AssumeRole"}]
-  }'
-aws iam attach-role-policy --role-name geekbrain-chat-lambda-role \
-  --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+1. IAM → Roles → Create role → Lambda
+2. Attach policies:
+   - `AWSLambdaBasicExecutionRole`
+3. Role name: `geekbrain-chat-lambda-role`
+4. Create role
 
-# Thêm quyền invoke Bedrock Agent
-ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-aws iam put-role-policy --role-name geekbrain-chat-lambda-role \
-  --policy-name bedrock-invoke \
-  --policy-document "{
-    \"Version\": \"2012-10-17\",
-    \"Statement\": [{
-      \"Effect\": \"Allow\",
-      \"Action\": \"bedrock:InvokeAgent\",
-      \"Resource\": \"arn:aws:bedrock:us-east-1:${ACCOUNT_ID}:agent-alias/${AGENT_ID}/*\"
-    }]
-  }"
+**Thêm inline policy cho Bedrock:**
 
-sleep 10
-
-# Zip chỉ file lambda_function.py (không cần dependencies)
-zip chat_lambda.zip -j lambda/lambda_function.py
-
-CHAT_ROLE_ARN=$(aws iam get-role --role-name geekbrain-chat-lambda-role --query 'Role.Arn' --output text)
-
-aws lambda create-function \
-  --function-name geekbrain-chat \
-  --runtime python3.12 \
-  --handler lambda_function.handler \
-  --role $CHAT_ROLE_ARN \
-  --zip-file fileb://chat_lambda.zip \
-  --timeout 120 \
-  --memory-size 256 \
-  --environment "Variables={AGENT_ID=$AGENT_ID,AGENT_ALIAS_ID=$AGENT_ALIAS_ID,AWS_REGION_NAME=us-east-1}"
+5. Vào role vừa tạo → **Add permissions** → **Create inline policy**
+6. JSON tab:
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": "bedrock:InvokeAgent",
+    "Resource": "arn:aws:bedrock:us-east-1:<ACCOUNT_ID>:agent-alias/<AGENT_ID>/*"
+  }]
+}
 ```
+7. Policy name: `bedrock-invoke` → Create
 
-> **Lưu ý:** Lambda Chat chạy NGOÀI VPC — không có `--vpc-config`. Gọi Bedrock trực tiếp qua AWS network.
+### 8.2 Tạo Lambda
 
-### 8.2 Tạo API Gateway (Chat)
+1. Lambda → Create function
+2. Name: `geekbrain-chat`
+3. Runtime: Python 3.12
+4. Role: `geekbrain-chat-lambda-role`
+5. Create
 
-1. AWS Console → API Gateway → Create REST API
-2. Name: `geekbrain-chat-api`
-3. Create resource `/chat`
-4. Create method `POST` → Integration: Lambda Proxy → `geekbrain-chat`
-5. Create method `OPTIONS` → Mock integration (cho CORS)
-6. Enable CORS trên resource `/chat`
-7. Deploy → Stage: `prod`
+Upload code:
+6. Tab **Code** → copy-paste nội dung file `lambda/lambda_function.py` vào editor
+   (hoặc zip file đó và upload)
 
-```bash
-CHAT_API_URL="https://xxxxxxxx.execute-api.us-east-1.amazonaws.com/prod"
-```
+7. Configuration:
+   - Timeout: **2 minutes** (120s) — Agent cần thời gian orchestrate
+   - Memory: 256 MB
+   - **KHÔNG cần VPC** — gọi Bedrock trực tiếp qua AWS network
+   - Environment variables:
+     - `AGENT_ID` = (Agent ID từ bước 7)
+     - `AGENT_ALIAS_ID` = (Alias ID từ bước 7)
+     - `AWS_REGION_NAME` = `us-east-1`
+8. Runtime settings: Handler = `lambda_function.handler`
 
-### 8.3 Test
+### 8.3 Tạo API Gateway
 
-```bash
-curl -X POST $CHAT_API_URL/chat \
-  -H "Content-Type: application/json" \
-  -d '{"question": "Who leads Team Platform?", "session_id": "test-1"}'
-```
+1. **API Gateway Console** → Create API → **REST API** → Build
+2. API name: `geekbrain-chat-api`
+3. Create API
+
+**Tạo resource `/chat`:**
+
+4. Resources → Actions → **Create Resource**
+   - Resource name: `chat`
+   - Resource path: `/chat`
+   - Create
+
+**Tạo method POST:**
+
+5. Chọn `/chat` → Actions → **Create Method** → `POST`
+   - Integration type: **Lambda Function Proxy**
+   - Lambda: `geekbrain-chat`
+   - Save → OK
+
+**Enable CORS:**
+
+6. Chọn `/chat` → Actions → **Enable CORS**
+   - Methods: POST, OPTIONS
+   - Access-Control-Allow-Origin: `*`
+   - Enable CORS → Yes, replace existing values
+
+**Deploy:**
+
+7. Actions → **Deploy API**
+   - Stage: New Stage → `prod`
+   - Deploy
+
+📝 **Ghi lại:** `https://xxxxxxxx.execute-api.us-east-1.amazonaws.com/prod`
+
+### 8.4 Test
+
+Trong API Gateway Console → chọn `POST /chat` → **Test**:
+- Request body: `{"question": "Who leads Team Platform?", "session_id": "test"}`
+- Click Test
+- Phải thấy response với answer + sources
 
 ---
 
@@ -569,75 +609,106 @@ curl -X POST $CHAT_API_URL/chat \
 
 ### 9.1 Tạo S3 Bucket
 
-```bash
-FRONTEND_BUCKET="geekbrain-frontend-${ACCOUNT_ID}"
-aws s3 mb s3://$FRONTEND_BUCKET
+1. **S3 Console** → Create bucket
+2. Name: `geekbrain-frontend-<any-unique-suffix>`
+3. Region: us-east-1
+4. Block all public access: **ON** (CloudFront sẽ access qua OAC)
+5. Create bucket
+
+### 9.2 Sửa index.html — inject API URL
+
+Mở `frontend/index.html` trên máy local, thêm trước `</head>`:
+
+```html
+<script>window.GEEKBRAIN_API_URL='https://xxxxxxxx.execute-api.us-east-1.amazonaws.com/prod';</script>
 ```
 
-### 9.2 Inject API URL vào index.html
-
-```bash
-# Thêm API URL vào frontend
-sed "s|</head>|<script>window.GEEKBRAIN_API_URL='${CHAT_API_URL}';</script></head>|" \
-  frontend/index.html > /tmp/index.html
-```
+(Thay URL bằng Chat API Gateway URL từ bước 8)
 
 ### 9.3 Upload files
 
-```bash
-aws s3 cp /tmp/index.html s3://$FRONTEND_BUCKET/index.html --content-type "text/html"
-aws s3 cp frontend/style.css s3://$FRONTEND_BUCKET/style.css --content-type "text/css"
-aws s3 cp frontend/app.js s3://$FRONTEND_BUCKET/app.js --content-type "application/javascript"
-```
+1. Mở bucket → **Upload**
+2. Upload 3 files:
+   - `index.html` (đã sửa)
+   - `style.css`
+   - `app.js`
+3. Với mỗi file, set Content-Type đúng:
+   - `index.html` → `text/html`
+   - `style.css` → `text/css`
+   - `app.js` → `application/javascript`
 
 ### 9.4 Tạo CloudFront Distribution
 
-1. AWS Console → CloudFront → Create Distribution
-2. Origin: S3 bucket `geekbrain-frontend-xxxxx`
-3. Origin Access: **Origin Access Control (OAC)** → Create new
-4. Default root object: `index.html`
-5. Viewer protocol: Redirect HTTP to HTTPS
-6. Price class: Use only North America and Europe
-7. Create Distribution
-8. Copy the S3 bucket policy shown → paste vào S3 bucket policy
+1. **CloudFront Console** → Create distribution
+2. Origin:
+   - Origin domain: chọn S3 bucket vừa tạo
+   - Origin access: **Origin access control settings (recommended)**
+   - Create new OAC → Create
+3. Default cache behavior:
+   - Viewer protocol: **Redirect HTTP to HTTPS**
+   - Allowed HTTP methods: GET, HEAD
+4. Settings:
+   - Default root object: `index.html`
+   - Price class: Use only North America and Europe (tiết kiệm)
+5. Create distribution
 
-Đợi ~5 phút deploy. URL: `https://dxxxxxxxxxx.cloudfront.net`
+**Quan trọng:** CloudFront sẽ hiển thị thông báo "S3 bucket policy needs to be updated"
+
+6. Copy policy statement → Vào S3 bucket → **Permissions** → **Bucket policy** → Paste → Save
+
+**Custom error responses** (SPA routing):
+
+7. Trong CloudFront → Error pages → Create custom error response:
+   - Error code: 403 → Response page: `/index.html`, Response code: 200
+   - Error code: 404 → Response page: `/index.html`, Response code: 200
+
+**Đợi ~5 phút** cho distribution deploy. Status = `Enabled`.
+
+📝 **Ghi lại URL:** `https://dxxxxxxxxxx.cloudfront.net`
 
 ---
 
 ## Bước 10 — Test End-to-End
 
-Mở CloudFront URL trong browser.
+Mở CloudFront URL trong browser. Status phải hiển thị "Connected".
 
-### L1 Test
+### Test L1 — Simple RAG
 ```
-"Who leads Team Platform and what services do they own?"
-→ Alex Chen. Owns PaymentGW + AuthSvc
-→ Source tag: team_platform.md
-```
-
-### L2 Test
-```
-"What is PaymentGW's API rate limit?"
-→ 1000 req/min (v2 supersedes v1's 500)
+Hỏi: "Who leads Team Platform and what services do they own?"
+Expected: Alex Chen. Owns PaymentGW + AuthSvc
+Verify: Source tag xanh hiển thị team_platform.md
 ```
 
-### L3 Test
+### Test L2 — Conflict Resolution
 ```
-"What was PaymentGW's total infrastructure cost in Q1 2026?"
-→ $16,500 (tool badge: query_database)
+Hỏi: "What is PaymentGW's API rate limit?"
+Expected: 1000 req/min (mentions v2 supersedes v1)
+Verify: Multiple source tags
+```
+
+### Test L3 — Tool Calling
+```
+Hỏi: "What was PaymentGW's total infrastructure cost in Q1 2026?"
+Expected: $16,500
+Verify: Tool badge tím "query_database"
 ```
 
 ```
-"What is PaymentGW's current p99 latency?"
-→ ~185ms (tool badge: get_service_metrics)
+Hỏi: "What is PaymentGW's current p99 latency?"
+Expected: ~185ms
+Verify: Tool badge "get_service_metrics"
 ```
 
-### L4 Test (multi-turn — cùng session)
+### Test L4 — Memory (multi-turn, cùng session)
 ```
 Turn 1: "Which service had the highest infrastructure cost in March 2026?"
+→ PaymentGW $7,500
+
 Turn 2: "Why did its costs spike?"
+→ INC-005, circuit breaker stuck OPEN
+
 Turn 3: "Which team is responsible?"
+→ Team Platform, Alex Chen
 ```
 
 ---
@@ -646,39 +717,53 @@ Turn 3: "Which team is responsible?"
 
 | Vấn đề | Nguyên nhân | Fix |
 |--------|-------------|-----|
-| Lambda timeout | Bedrock Agent chậm | Tăng timeout lên 120-180s |
-| Agent không gọi tool | Tool description mơ hồ | Thêm "CURRENT" vs "HISTORICAL" vào description |
-| DB connection refused | Lambda SG không reach RDS | Check RDS SG cho phép port 5432 từ Lambda SG |
-| Monitoring API 503 | Lambda cold start | Gọi lại — lần 2 sẽ nhanh |
-| KB trả về 0 chunks | Chưa sync | Vào KB Console → Sync |
-| Frontend "No API" | URL chưa inject | Check `window.GEEKBRAIN_API_URL` trong page source |
-| CORS error | OPTIONS method thiếu | Thêm CORS headers trên API Gateway |
-| VPC Endpoint fail | private_dns chưa enable | Recreate endpoint với `--private-dns-enabled` |
+| Frontend "No API configured" | URL chưa inject vào index.html | Sửa index.html, re-upload lên S3, invalidate CloudFront cache |
+| Agent timeout | Bedrock orchestration chậm | Tăng Lambda Chat timeout lên 180s |
+| Agent không gọi tool | Description mơ hồ | Phải có "CURRENT" vs "HISTORICAL" trong description |
+| DB connection refused | Lambda SG → RDS SG rule thiếu | Check RDS SG allow port 5432 từ Lambda SG |
+| Monitoring API 502 | Lambda crash | Check Lambda logs trong CloudWatch |
+| KB trả 0 chunks | Chưa sync / sync fail | Vào KB → Sync lại |
+| CORS error frontend | OPTIONS method thiếu | Enable CORS trên API Gateway → re-deploy |
+| Action Group Lambda fail | VPC Endpoint DNS chưa active | Đợi 2-3 phút sau khi tạo endpoint |
+| CloudFront 403 | Bucket policy chưa update | Copy policy từ CloudFront → paste vào S3 bucket policy |
 
 ---
 
-## Tổng thời gian setup thủ công
+## Invalidate CloudFront Cache (khi update frontend)
+
+1. CloudFront → Distribution → tab **Invalidations**
+2. Create invalidation
+3. Path: `/*`
+4. Create
+
+---
+
+## Tổng thời gian
 
 | Bước | Thời gian |
 |------|-----------|
-| VPC + Networking | 5 min |
-| RDS | 8 min (đợi available) |
-| Seed Data | 3 min |
-| Monitoring API | 5 min |
-| Knowledge Base + Sync | 10 min |
-| Action Group Lambda | 5 min |
-| Bedrock Agent | 10 min (config tools) |
-| Lambda Chat + API GW | 5 min |
-| Frontend | 10 min (CloudFront deploy) |
-| **Total** | **~60 min** |
+| VPC + Networking | 10 min |
+| RDS | 10 min (đợi available) |
+| Seed Data | 5 min |
+| Monitoring API + API GW | 10 min |
+| Knowledge Base + Sync | 15 min |
+| Action Group Lambda | 10 min |
+| Bedrock Agent (config tools) | 15 min |
+| Lambda Chat + API Gateway | 10 min |
+| Frontend + CloudFront | 10 min |
+| **Total** | **~90 min** |
 
 ---
 
-## So sánh: Manual vs Terraform
+## Checklist final
 
-| | Manual (guide này) | Terraform |
-|---|---|---|
-| Thời gian | ~60 min | ~15 min (apply) |
-| Reproducible | Khó — phải nhớ từng bước | 1 lệnh `terraform apply` |
-| Team collab | Mỗi người config khác nhau | State chung trên S3 |
-| Khi nào dùng | Học, debug, hiểu hệ thống | Production, demo, CI/CD |
+- [ ] VPC + 2 private subnets + 3 SGs + VPC Endpoint created
+- [ ] RDS running, seed data loaded (4 tables)
+- [ ] Monitoring API responding (`/services` returns 6 services)
+- [ ] Knowledge Base synced (36 docs)
+- [ ] Action Group Lambda in VPC with env vars
+- [ ] Bedrock Agent prepared + alias created + 6 tools defined
+- [ ] Lambda Chat outside VPC with Agent ID/Alias ID
+- [ ] Chat API Gateway deployed + CORS enabled
+- [ ] Frontend on CloudFront with correct API URL
+- [ ] All 4 levels working (L1-L4)
