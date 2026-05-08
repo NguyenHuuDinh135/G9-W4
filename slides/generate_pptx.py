@@ -84,15 +84,36 @@ def add_multiline(slide, left, top, width, height, lines, font_size=14, color=GR
     return txBox
 
 
-def add_image_safe(slide, img_path, left, top, width=None, height=None):
+def add_image_safe(slide, img_path, left, top, max_width=None, max_height=None):
     if not os.path.exists(img_path):
         return None
-    kwargs = {"left": left, "top": top}
-    if width:
-        kwargs["width"] = width
-    if height:
-        kwargs["height"] = height
-    return slide.shapes.add_picture(img_path, **kwargs)
+    from PIL import Image
+    img = Image.open(img_path)
+    img_w, img_h = img.size
+    aspect = img_w / img_h
+
+    # Calculate dimensions that fit within bounds
+    if max_width and max_height:
+        w = max_width
+        h = int(w / aspect)
+        if h > max_height:
+            h = max_height
+            w = int(h * aspect)
+    elif max_width:
+        w = max_width
+        h = int(w / aspect)
+        # Ensure it doesn't exceed slide height minus top margin
+        available_h = SLIDE_HEIGHT - top - Inches(0.3)
+        if h > available_h:
+            h = available_h
+            w = int(h * aspect)
+    elif max_height:
+        h = max_height
+        w = int(h * aspect)
+    else:
+        return slide.shapes.add_picture(img_path, left, top)
+
+    return slide.shapes.add_picture(img_path, left, top, w, h)
 
 
 def add_card(slide, left, top, width, height, title, body, accent_color=None, dark=False):
@@ -187,7 +208,7 @@ def slide_architecture(prs):
     add_text(slide, Inches(0.8), Inches(0.8), Inches(8), Inches(0.6),
              "System Architecture.", font_size=28, bold=True, color=BRAND_NAVY)
     add_image_safe(slide, os.path.join(DIAGRAMS_DIR, "w4_architecture.png"),
-                   Inches(0.3), Inches(1.6), width=Inches(12.7))
+                   Inches(0.3), Inches(1.6), max_width=Inches(12.7), max_height=Inches(5.5))
 
 
 def slide_decisions(prs):
@@ -224,7 +245,7 @@ def slide_request_flow(prs):
     add_text(slide, Inches(0.8), Inches(0.8), Inches(10), Inches(0.6),
              "Request Flow & Orchestration Loop.", font_size=28, bold=True, color=BRAND_NAVY)
     add_image_safe(slide, os.path.join(DIAGRAMS_DIR, "w4_request_flow.png"),
-                   Inches(0.3), Inches(1.6), width=Inches(12.7))
+                   Inches(0.3), Inches(1.6), max_width=Inches(12.7), max_height=Inches(5.5))
 
 
 def slide_tool_routing(prs):
@@ -234,7 +255,7 @@ def slide_tool_routing(prs):
     add_text(slide, Inches(0.8), Inches(0.8), Inches(10), Inches(0.6),
              "Agent Decision Logic — KB vs Tools.", font_size=28, bold=True, color=BRAND_NAVY)
     add_image_safe(slide, os.path.join(DIAGRAMS_DIR, "w4_tool_routing.png"),
-                   Inches(0.3), Inches(1.6), width=Inches(12.7))
+                   Inches(0.3), Inches(1.6), max_width=Inches(12.7), max_height=Inches(5.5))
 
 
 def slide_level(prs, level_num, level_title, description, screenshot, proof=None):
@@ -253,10 +274,10 @@ def slide_level(prs, level_num, level_title, description, screenshot, proof=None
     img_path = os.path.join(SCREENSHOTS_DIR, screenshot)
     if proof:
         proof_path = os.path.join(SCREENSHOTS_DIR, proof)
-        add_image_safe(slide, img_path, Inches(0.4), Inches(2.0), width=Inches(6.2))
-        add_image_safe(slide, proof_path, Inches(6.8), Inches(2.0), width=Inches(6.2))
+        add_image_safe(slide, img_path, Inches(0.4), Inches(2.0), max_width=Inches(6.2), max_height=Inches(5.0))
+        add_image_safe(slide, proof_path, Inches(6.8), Inches(2.0), max_width=Inches(6.2), max_height=Inches(5.0))
     else:
-        add_image_safe(slide, img_path, Inches(1.5), Inches(2.0), width=Inches(10.3))
+        add_image_safe(slide, img_path, Inches(1.5), Inches(2.0), max_width=Inches(10.3), max_height=Inches(5.0))
 
 
 def slide_bonus_a(prs):
@@ -269,7 +290,7 @@ def slide_bonus_a(prs):
              "Pipeline internals: source tags (green), tool badges (purple), query details, full orchestration trace.",
              font_size=12, color=GRAY)
     add_image_safe(slide, os.path.join(SCREENSHOTS_DIR, "bonus_a.png"),
-                   Inches(1.2), Inches(2.0), width=Inches(10.8))
+                   Inches(1.2), Inches(2.0), max_width=Inches(10.8), max_height=Inches(5.0))
 
 
 def slide_bonus_c(prs):
