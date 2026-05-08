@@ -17,50 +17,7 @@
 
 ### System Architecture
 
-```text
-┌─────────────────────────────────────────────────────────────────────────┐
-│                         CloudFront (CDN)                                │
-│                frontend/ → S3 Static Website                            │
-└────────────────────────────────┬────────────────────────────────────────┘
-                                 │ POST /chat
-                                 ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                    API Gateway (Regional, /prod)                        │
-└────────────────────────────────┬────────────────────────────────────────┘
-                                 │
-                                 ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│               Lambda: geekbrain-chat (lambda_function.py)               │
-│               Invokes Bedrock Agent via InvokeAgent API                 │
-└────────────────────────────────┬────────────────────────────────────────┘
-                                 │
-                                 ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                     Bedrock Agent (DeepSeek V3.2)                       │
-│  ┌──────────────────────┐        ┌────────────────────────────────────┐ │
-│  │    Knowledge Base     │        │    Action Group (Tools)            │ │
-│  │    36 markdown docs   │        │    → Lambda: geekbrain-action-group │ │
-│  │    S3 → OpenSearch    │        │     (action_group_function.py)     │ │
-│  │    Serverless (AOSS)  │        │                                    │ │
-│  │    Titan Embed v2     │        │     Tools:                         │ │
-│  │    Hierarchical chunks│        │     • query_database → RDS Postgre │ │
-│  │                       │        │     • get_service_status → Mon API │ │
-│  └──────────────────────┘        │     • list_services → Mon. API     │ │
-│                                  └─────────────┬──────────────────────┘ │
-└─────────────────────────────────────────────────┼────────────────────────┘
-                                                  │
-                          ┌───────────────────────┼───────────────────────┐
-                          │                       │                       │
-                          ▼                       ▼                       ▼
-              ┌──────────────────┐   ┌──────────────────┐   ┌──────────────────┐
-              │  RDS PostgreSQL  │   │  Monitoring API  │   │  VPC Network     │
-              │  (Private Subnet)│   │  (FastAPI+Mangum)│   │  Private Subnets │
-              │                  │   │  Lambda + APIGW  │   │  Security Groups │
-              │  Tables:         │   │                  │   │  VPC Endpoint    │
-              │  • monthly_costs │   │  Endpoints:      │   └──────────────────┘
-              │  • incidents     │   │  /status/{svc}   │
-              │  • sla_targets   │   │  /metrics/{svc}  │
-              └──────────────────┘   └──────────────────┘
+![System Architecture](./diagrams/w4_architecture.png)
 
 ### Request Flow Diagram
 
@@ -143,152 +100,144 @@
 
 ## Section 4 — Per-Level Evidence
 
-### L1 — Simple RAG (10 questions)
+### L1 — Simple RAG (Retrieval)
 
-| ID | Question | Expected Answer | Source |
-|----|----------|----------------|--------|
-| L1-01 | What is the current API rate limit for PaymentGW? | 1000 req/min per merchant | api_reference_v2.md |
-| L1-02 | Who leads Team Platform and what services do they own? | Alex Chen. Owns PaymentGW + AuthSvc | team_platform.md |
-| L1-03 | What was the root cause of the March 5, 2026 PaymentGW outage? | Circuit breaker stuck OPEN due to health check misconfiguration | postmortem_INC005 |
-| L1-04 | What is GeekBrain's data retention policy for transaction logs? | 7 years | security_policy.md |
-| L1-05 | What are GeekBrain's production deployment windows? | Mon-Thu 09:00-17:00 VN. Freeze Fri 18:00 - Mon 08:00 | deployment_policy.md |
-| L1-06 | What authentication method does the PaymentGW API use? | API key + HMAC-SHA256 signature | api_reference_v2.md |
-| L1-07 | What message queue does NotificationSvc use? | Amazon SQS | service_notificationsvc.md |
-| L1-08 | After March 5 incident, circuit breaker review deadline? | April 15, 2026 | postmortem_INC005 |
-| L1-09 | What programming language is AuthSvc written in? | Go | service_authsvc.md |
-| L1-10 | How often does GeekBrain rotate JWT signing keys? | Every 30 days | security_policy.md |
+**Screenshot:** correct answer with source document cited
 
-**Screenshots:**
+<!-- TODO: Chụp screenshot frontend showing answer + green source tag -->
+![L1 Answer](./screenshots/l1_answer.png)
 
-<!-- TODO: Chụp 1 screenshot cho mỗi question (hoặc gộp nhiều questions/screenshot) -->
-![L1-01](./screenshots/l1_01.png)
-![L1-02](./screenshots/l1_02.png)
-![L1-03](./screenshots/l1_03.png)
-![L1-04](./screenshots/l1_04.png)
-![L1-05](./screenshots/l1_05.png)
-![L1-06](./screenshots/l1_06.png)
-![L1-07](./screenshots/l1_07.png)
-![L1-08](./screenshots/l1_08.png)
-![L1-09](./screenshots/l1_09.png)
-![L1-10](./screenshots/l1_10.png)
+**Proof:** log showing retrieval happened (source tags visible in frontend)
+
+<!-- TODO: Chụp screenshot showing source document badges -->
+![L1 Proof](./screenshots/l1_proof.png)
+
+**Test questions used:**
+
+| ID | Question | Expected Answer |
+|----|----------|----------------|
+| L1-01 | What is the current API rate limit for PaymentGW? | 1000 req/min per merchant |
+| L1-02 | Who leads Team Platform and what services do they own? | Alex Chen. Owns PaymentGW + AuthSvc |
+| L1-03 | What was the root cause of the March 5, 2026 PaymentGW outage? | Circuit breaker stuck OPEN |
+| L1-04 | What is GeekBrain's data retention policy for transaction logs? | 7 years |
+| L1-05 | What are GeekBrain's production deployment windows? | Mon-Thu 09:00-17:00 VN |
+| L1-06 | What authentication method does the PaymentGW API use? | API key + HMAC-SHA256 |
+| L1-07 | What message queue does NotificationSvc use? | Amazon SQS |
+| L1-08 | After March 5 incident, circuit breaker review deadline? | April 15, 2026 |
+| L1-09 | What programming language is AuthSvc written in? | Go |
+| L1-10 | How often does GeekBrain rotate JWT signing keys? | Every 30 days |
 
 ---
 
-### L2 — Multi-Source Retrieval (8 questions)
+### L2 — Multi-Source Retrieval (Conflict Resolution)
 
-| ID | Question | Expected Answer | Sources |
-|----|----------|----------------|---------|
-| L2-01 | What is PaymentGW's API rate limit? | 1000 (v2 supersedes v1's 500) | v2 + v1_archived |
-| L2-02 | P1 bug in OrderSvc at 21:00 Friday — can they deploy? | Yes. Freeze active but P1 overrides with VP Mark Sullivan approval | deployment + incident_response + team |
-| L2-03 | Which services affected if AuthSvc goes down? | PaymentGW + OrderSvc (direct dependencies) | service_architecture + authsvc |
-| L2-04 | Top priorities for cost reduction and why? | PaymentGW (cost > revenue growth) + FraudDetector (expensive ML) | q1_review + cost_optimization |
-| L2-05 | Common lessons from March 2026 incidents? | Both need automated monitoring/detection | INC005 + INC006 postmortems |
-| L2-06 | What should new Team Data engineer know? | Ryan Blake lead, owns ReportingSvc + FraudDetector, PCI-DSS training | onboarding + team_data |
-| L2-07 | NotificationSvc concerns + proposed fix? | Slow delivery → SQS consumer auto-scaling recommended | q1_review + capacity_planning + arch_review |
-| L2-08 | Complete P1 escalation path for PaymentGW? | Alert → Alex Chen (15min) → Mark Sullivan (30min) → James Wright (1hr) | incident_response + team_platform |
+**Screenshot:** correct multi-doc synthesis or conflict resolution
 
-**Screenshots:**
+<!-- TODO: Chụp screenshot showing conflict resolution (e.g., API rate limit 1000 vs 500) -->
+![L2 Answer](./screenshots/l2_answer.png)
 
-<!-- TODO: Chụp screenshot cho mỗi question -->
-![L2-01](./screenshots/l2_01.png)
-![L2-02](./screenshots/l2_02.png)
-![L2-03](./screenshots/l2_03.png)
-![L2-04](./screenshots/l2_04.png)
-![L2-05](./screenshots/l2_05.png)
-![L2-06](./screenshots/l2_06.png)
-![L2-07](./screenshots/l2_07.png)
-![L2-08](./screenshots/l2_08.png)
+**How the system handles conflicts:** Agent instruction includes *"When documents conflict, prefer the most recent version and status='current' over 'archived'. State the conflict explicitly."*
+
+**Test questions used:**
+
+| ID | Question | Expected Answer |
+|----|----------|----------------|
+| L2-01 | What is PaymentGW's API rate limit? | 1000 (v2 supersedes v1's 500) |
+| L2-02 | P1 bug in OrderSvc at 21:00 Friday — can they deploy? | Yes, P1 overrides freeze with VP approval |
+| L2-03 | Which services affected if AuthSvc goes down? | PaymentGW + OrderSvc |
+| L2-04 | Top priorities for cost reduction and why? | PaymentGW + FraudDetector |
+| L2-05 | Common lessons from March 2026 incidents? | Both need automated monitoring |
+| L2-06 | What should new Team Data engineer know? | Ryan Blake lead, PCI-DSS training |
+| L2-07 | NotificationSvc concerns + proposed fix? | SQS consumer auto-scaling |
+| L2-08 | Complete P1 escalation path for PaymentGW? | Alex Chen → Mark Sullivan → James Wright |
 
 ---
 
-### L3 — Tool-Augmented RAG (10 questions)
+### L3 — Tool-Augmented RAG
 
-| ID | Question | Expected Answer | Tool Needed |
-|----|----------|----------------|-------------|
+**Screenshot:** correct numerical answer (showing tool badge)
+
+<!-- TODO: Chụp screenshot showing answer + purple tool badge + query details -->
+![L3 Answer](./screenshots/l3_answer.png)
+
+**Proof:** tool call log showing the tool was called and returned real data
+
+<!-- TODO: Chụp screenshot showing expanded "Query Details" section -->
+![L3 Proof](./screenshots/l3_proof.png)
+
+**Test questions used:**
+
+| ID | Question | Expected Answer | Tool |
+|----|----------|----------------|------|
 | L3-01 | What is PaymentGW's current p99 latency? | ~185ms | get_service_metrics |
-| L3-02 | Total infrastructure cost across ALL services in Q1 2026? | $56,350 | query_database |
-| L3-03 | Which service had highest total cost in March 2026? | PaymentGW at $7,500 | query_database |
-| L3-04 | Is PaymentGW's current error rate within SLA target? | Yes. 0.08% vs target 0.1% | metrics + DB |
-| L3-05 | Compare PaymentGW current p99 to Q1 daily average? | Current ~185ms vs avg ~183ms (slightly above) | metrics + DB |
-| L3-06 | Is NotificationSvc meeting its SLA targets? | No. Latency 3200ms > 2000ms target, error 2.1% > 1.0% target | metrics + DB |
-| L3-07 | PaymentGW cost increase Q4 2025 → Q1 2026? | Q4=$11,700 → Q1=$16,500. +$4,800 (+41%) | query_database |
-| L3-08 | Which service handles most requests per minute? | AuthSvc at ~28,000 rpm | get_service_metrics (multiple) |
-| L3-09 | FraudDetector CPU utilization vs other services? | FraudDetector 72%. NotificationSvc highest at 88% | get_service_metrics (multiple) |
-| L3-10 | Total incidents in Q1 2026? Which service had most? | 7 incidents. PaymentGW had 3 (most) | query_database |
+| L3-02 | Total infrastructure cost ALL services Q1 2026? | $56,350 | query_database |
+| L3-03 | Highest cost service March 2026? | PaymentGW $7,500 | query_database |
+| L3-04 | Is PaymentGW error rate within SLA? | Yes. 0.08% vs 0.1% target | metrics + DB |
+| L3-05 | PaymentGW current p99 vs Q1 average? | ~185ms vs ~183ms | metrics + DB |
+| L3-06 | Is NotificationSvc meeting SLA? | No. 3200ms > 2000ms, 2.1% > 1.0% | metrics + DB |
+| L3-07 | PaymentGW cost increase Q4→Q1? | $11,700→$16,500 (+41%) | query_database |
+| L3-08 | Most requests per minute? | AuthSvc ~28,000 rpm | get_service_metrics |
+| L3-09 | FraudDetector CPU vs others? | 72%. NotificationSvc highest 88% | get_service_metrics |
+| L3-10 | Total incidents Q1 2026? | 7 incidents, PaymentGW had 3 | query_database |
 
-**Screenshots:**
+**Tools registered:**
 
-<!-- TODO: Chụp screenshot cho mỗi question, showing tool badge + answer -->
-![L3-01](./screenshots/l3_01.png)
-![L3-02](./screenshots/l3_02.png)
-![L3-03](./screenshots/l3_03.png)
-![L3-04](./screenshots/l3_04.png)
-![L3-05](./screenshots/l3_05.png)
-![L3-06](./screenshots/l3_06.png)
-![L3-07](./screenshots/l3_07.png)
-![L3-08](./screenshots/l3_08.png)
-![L3-09](./screenshots/l3_09.png)
-![L3-10](./screenshots/l3_10.png)
-
-**Tools registered with Bedrock Agent Action Group:**
-
-| Tool | Function | Data Source |
-|------|----------|-------------|
-| `query_database` | SQL SELECT on PostgreSQL | RDS (monthly_costs, incidents, sla_targets, daily_metrics) |
-| `get_service_status` | Current health/uptime | Monitoring API `/status/{svc}` |
-| `get_service_metrics` | Live latency/error/requests | Monitoring API `/metrics/{svc}` |
-| `list_services` | List all 6 services | Monitoring API `/services` |
-| `get_incident_history` | Past incident records | Monitoring API `/incidents/{svc}` |
-| `compare_services` | Rank services by metric | Monitoring API (aggregates all) |
+| Tool | Data Source |
+|------|-------------|
+| `query_database` | RDS (monthly_costs, incidents, sla_targets, daily_metrics) |
+| `get_service_status` | Monitoring API `/status/{svc}` |
+| `get_service_metrics` | Monitoring API `/metrics/{svc}` |
+| `list_services` | Monitoring API `/services` |
+| `get_incident_history` | Monitoring API `/incidents/{svc}` |
+| `compare_services` | Monitoring API (aggregates all) |
 
 ---
 
 ### L4 — Memory (Multi-turn Conversation)
 
+**Screenshot:** 3-4 turn conversation where follow-ups reference prior turns
+
+<!-- TODO: Chụp screenshot showing full multi-turn conversation -->
+![L4 Conversation](./screenshots/l4_conversation.png)
+
 **Test conversation:**
 
-| Turn | User Question | Expected Resolution |
-|------|--------------|-------------------|
-| 1 | "Which service had the highest infrastructure cost in March 2026?" | → query_database → PaymentGW at $7,500 |
-| 2 | "Why did its costs spike?" | Resolve "its" = PaymentGW → KB retrieval → postmortem INC-005 |
-| 3 | "Which team is responsible?" | Resolve context → Team Platform, led by Alex Chen |
-| 4 | "The postmortem mentioned a review deadline. Is it overdue?" | Retrieve deadline (April 15) → compare to current date → Yes |
+| Turn | Question | Resolution |
+|------|----------|------------|
+| 1 | "Which service had the highest infrastructure cost in March 2026?" | → query_database → PaymentGW $7,500 |
+| 2 | "Why did its costs spike?" | "its" = PaymentGW → KB → postmortem INC-005 |
+| 3 | "Which team is responsible?" | context = PaymentGW → Team Platform, Alex Chen |
+| 4 | "The postmortem mentioned a review deadline. Is it overdue?" | April 15 deadline → Yes, overdue |
 
-**Screenshot:**
-
-<!-- TODO: Chụp screenshot showing full 4-turn conversation -->
-![L4 Conversation](./screenshots/l4_multiturn.png)
-
-**Memory strategy:** Bedrock Agent session management via `sessionId`. Each `invoke_agent()` call passes the same session ID. Agent maintains context within session (idle TTL: 1800s). Frontend generates unique session ID per browser session via `sessionStorage`.
+**Memory strategy:** Bedrock Agent session via `sessionId` parameter (TTL: 1800s). Frontend generates unique ID per browser session.
 
 ---
 
 ### Bonus A — Observability Dashboard
 
-Frontend displays pipeline internals alongside each answer:
+**Screenshot:** dashboard showing question being processed — retrieval, tool calls, LLM decisions visible
 
-- **Source tags** (green) — which KB documents were cited
-- **Tool badges** (purple) — which tools were called
-- **Query Details** (collapsible) — exact SQL/parameters passed to each tool
+<!-- TODO: Chụp screenshot showing tool badges + source tags + expanded query details -->
+![Bonus A](./screenshots/bonus_a.png)
+
+Frontend displays pipeline internals alongside each answer:
+- **Source tags** (green) — KB documents cited
+- **Tool badges** (purple) — tools called
+- **Query Details** (collapsible) — exact SQL/parameters
 
 Implemented in `frontend/app.js` by parsing response fields: `sources`, `tools_used`, `tool_details`.
-
-**Screenshot:**
-
-<!-- TODO: Chụp screenshot showing tool badges + source tags + query details expanded -->
-![Bonus A Observability](./screenshots/bonus_a_observability.png)
 
 ---
 
 ### Bonus C — Knowledge Base Sync
 
-KB sync automated via Terraform:
+KB sync automated via Terraform. When docs change (MD5 hash trigger):
 
-1. Upload `.md` files to S3 (detected via MD5 hash)
-2. `null_resource.kb_sync` calls `aws bedrock-agent start-ingestion-job`
-3. Polls until status = COMPLETE (timeout: 10 min)
+1. Upload `.md` files to S3
+2. `null_resource.kb_sync` → `aws bedrock-agent start-ingestion-job`
+3. Polls until COMPLETE (timeout: 10 min)
 
-**Evidence:** `terraform/modules/ai_engine/main.tf` — `kb_sync` resource with `docs_hash` trigger.
+**Evidence:** `terraform/modules/ai_engine/main.tf` — `kb_sync` resource.
 
 ---
 
