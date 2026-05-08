@@ -27,6 +27,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DOCS_DIR = os.path.join(BASE_DIR, "..", "docs")
 DIAGRAMS_DIR = os.path.join(DOCS_DIR, "diagrams")
 SCREENSHOTS_DIR = os.path.join(DOCS_DIR, "screenshots")
+CROPPED_DIR = os.path.join(BASE_DIR, ".cropped")
 
 SLIDE_WIDTH = Inches(13.333)
 SLIDE_HEIGHT = Inches(7.5)
@@ -84,11 +85,43 @@ def add_multiline(slide, left, top, width, height, lines, font_size=14, color=GR
     return txBox
 
 
-def add_image_safe(slide, img_path, left, top, max_width=None, max_height=None):
+def crop_to_landscape(img_path, target_ratio=16/9):
+    """Crop a portrait image to landscape by taking the top portion (where content is)."""
+    from PIL import Image
+    os.makedirs(CROPPED_DIR, exist_ok=True)
+
+    basename = os.path.basename(img_path)
+    cropped_path = os.path.join(CROPPED_DIR, basename)
+
+    img = Image.open(img_path)
+    img_w, img_h = img.size
+
+    # Already landscape — no crop needed
+    if img_w >= img_h:
+        return img_path
+
+    # Crop: keep full width, calculate height for target ratio
+    new_h = int(img_w / target_ratio)
+    if new_h > img_h:
+        new_h = img_h
+
+    # Crop from top (content is usually at top of chat screenshots)
+    cropped = img.crop((0, 0, img_w, new_h))
+    cropped.save(cropped_path, quality=95)
+    return cropped_path
+
+
+def add_image_safe(slide, img_path, left, top, max_width=None, max_height=None, crop_landscape=False):
     if not os.path.exists(img_path):
         return None
     from PIL import Image
-    img = Image.open(img_path)
+
+    # Optionally crop portrait to landscape
+    actual_path = img_path
+    if crop_landscape:
+        actual_path = crop_to_landscape(img_path)
+
+    img = Image.open(actual_path)
     img_w, img_h = img.size
     aspect = img_w / img_h
 
@@ -102,7 +135,6 @@ def add_image_safe(slide, img_path, left, top, max_width=None, max_height=None):
     elif max_width:
         w = max_width
         h = int(w / aspect)
-        # Ensure it doesn't exceed slide height minus top margin
         available_h = SLIDE_HEIGHT - top - Inches(0.3)
         if h > available_h:
             h = available_h
@@ -111,9 +143,9 @@ def add_image_safe(slide, img_path, left, top, max_width=None, max_height=None):
         h = max_height
         w = int(h * aspect)
     else:
-        return slide.shapes.add_picture(img_path, left, top)
+        return slide.shapes.add_picture(actual_path, left, top)
 
-    return slide.shapes.add_picture(img_path, left, top, w, h)
+    return slide.shapes.add_picture(actual_path, left, top, w, h)
 
 
 def add_card(slide, left, top, width, height, title, body, accent_color=None, dark=False):
@@ -274,10 +306,10 @@ def slide_level(prs, level_num, level_title, description, screenshot, proof=None
     img_path = os.path.join(SCREENSHOTS_DIR, screenshot)
     if proof:
         proof_path = os.path.join(SCREENSHOTS_DIR, proof)
-        add_image_safe(slide, img_path, Inches(0.4), Inches(2.0), max_width=Inches(6.2), max_height=Inches(5.0))
-        add_image_safe(slide, proof_path, Inches(6.8), Inches(2.0), max_width=Inches(6.2), max_height=Inches(5.0))
+        add_image_safe(slide, img_path, Inches(0.4), Inches(2.0), max_width=Inches(6.2), max_height=Inches(5.0), crop_landscape=True)
+        add_image_safe(slide, proof_path, Inches(6.8), Inches(2.0), max_width=Inches(6.2), max_height=Inches(5.0), crop_landscape=True)
     else:
-        add_image_safe(slide, img_path, Inches(1.5), Inches(2.0), max_width=Inches(10.3), max_height=Inches(5.0))
+        add_image_safe(slide, img_path, Inches(1.5), Inches(2.0), max_width=Inches(10.3), max_height=Inches(5.0), crop_landscape=True)
 
 
 def slide_bonus_a(prs):
@@ -290,7 +322,7 @@ def slide_bonus_a(prs):
              "Pipeline internals: source tags (green), tool badges (purple), query details, full orchestration trace.",
              font_size=12, color=GRAY)
     add_image_safe(slide, os.path.join(SCREENSHOTS_DIR, "bonus_a.png"),
-                   Inches(1.2), Inches(2.0), max_width=Inches(10.8), max_height=Inches(5.0))
+                   Inches(1.2), Inches(2.0), max_width=Inches(10.8), max_height=Inches(5.0), crop_landscape=True)
 
 
 def slide_bonus_c(prs):
