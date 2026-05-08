@@ -15,11 +15,52 @@
 
 ## Section 2 — Architecture Overview
 
-### System Architecture Diagram
+### System Architecture
 
-> See `docs/diagrams/w4_architecture.drawio` — open in draw.io and export PNG for slides.
-
-![System Architecture](./diagrams/w4_architecture.png)
+```text
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         CloudFront (CDN)                                │
+│                frontend/ → S3 Static Website                            │
+└────────────────────────────────┬────────────────────────────────────────┘
+                                 │ POST /chat
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    API Gateway (Regional, /prod)                        │
+└────────────────────────────────┬────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│               Lambda: geekbrain-chat (lambda_function.py)               │
+│               Invokes Bedrock Agent via InvokeAgent API                 │
+└────────────────────────────────┬────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                     Bedrock Agent (DeepSeek V3.2)                       │
+│  ┌──────────────────────┐        ┌────────────────────────────────────┐ │
+│  │    Knowledge Base     │        │    Action Group (Tools)            │ │
+│  │    36 markdown docs   │        │    → Lambda: geekbrain-action-group │ │
+│  │    S3 → OpenSearch    │        │     (action_group_function.py)     │ │
+│  │    Serverless (AOSS)  │        │                                    │ │
+│  │    Titan Embed v2     │        │     Tools:                         │ │
+│  │    Hierarchical chunks│        │     • query_database → RDS Postgre │ │
+│  │                       │        │     • get_service_status → Mon API │ │
+│  └──────────────────────┘        │     • list_services → Mon. API     │ │
+│                                  └─────────────┬──────────────────────┘ │
+└─────────────────────────────────────────────────┼────────────────────────┘
+                                                  │
+                          ┌───────────────────────┼───────────────────────┐
+                          │                       │                       │
+                          ▼                       ▼                       ▼
+              ┌──────────────────┐   ┌──────────────────┐   ┌──────────────────┐
+              │  RDS PostgreSQL  │   │  Monitoring API  │   │  VPC Network     │
+              │  (Private Subnet)│   │  (FastAPI+Mangum)│   │  Private Subnets │
+              │                  │   │  Lambda + APIGW  │   │  Security Groups │
+              │  Tables:         │   │                  │   │  VPC Endpoint    │
+              │  • monthly_costs │   │  Endpoints:      │   └──────────────────┘
+              │  • incidents     │   │  /status/{svc}   │
+              │  • sla_targets   │   │  /metrics/{svc}  │
+              └──────────────────┘   └──────────────────┘
 
 ### Request Flow Diagram
 
