@@ -104,12 +104,10 @@
 
 **Screenshot:** correct answer with source document cited
 
-<!-- TODO: Chụp screenshot frontend showing answer + green source tag -->
 ![L1 Answer](./screenshots/l1_answer.png)
 
 **Proof:** log showing retrieval happened (source tags visible in frontend)
 
-<!-- TODO: Chụp screenshot showing source document badges -->
 ![L1 Proof](./screenshots/l1_proof.png)
 
 **Test questions used:**
@@ -133,8 +131,11 @@
 
 **Screenshot:** correct multi-doc synthesis or conflict resolution
 
-<!-- TODO: Chụp screenshot showing conflict resolution (e.g., API rate limit 1000 vs 500) -->
 ![L2 Answer](./screenshots/l2_answer.png)
+
+**Proof:** multiple source documents cited with conflict resolution visible
+
+![L2 Proof](./screenshots/l2_proof.png)
 
 **How the system handles conflicts:** Agent instruction includes *"When documents conflict, prefer the most recent version and status='current' over 'archived'. State the conflict explicitly."*
 
@@ -157,12 +158,10 @@
 
 **Screenshot:** correct numerical answer (showing tool badge)
 
-<!-- TODO: Chụp screenshot showing answer + purple tool badge + query details -->
 ![L3 Answer](./screenshots/l3_answer.png)
 
 **Proof:** tool call log showing the tool was called and returned real data
 
-<!-- TODO: Chụp screenshot showing expanded "Query Details" section -->
 ![L3 Proof](./screenshots/l3_proof.png)
 
 **Test questions used:**
@@ -197,7 +196,6 @@
 
 **Screenshot:** 3-4 turn conversation where follow-ups reference prior turns
 
-<!-- TODO: Chụp screenshot showing full multi-turn conversation -->
 ![L4 Conversation](./screenshots/l4_conversation.png)
 
 **Test conversation:**
@@ -217,7 +215,6 @@
 
 **Screenshot:** dashboard showing question being processed — retrieval, tool calls, LLM decisions visible
 
-<!-- TODO: Chụp screenshot showing tool badges + source tags + expanded query details -->
 ![Bonus A](./screenshots/bonus_a.png)
 
 Frontend displays pipeline internals alongside each answer:
