@@ -9,7 +9,7 @@
 | **Mentor** | Anh Quang Phùng (Quality Assurance Lead, TechX) |
 | **LLM** | DeepSeek V3.2 via Amazon Bedrock |
 | **Framework** | Amazon Bedrock Agents (managed orchestration) |
-| **Repository** | |
+| **Repository** | https://github.com/hoang-trong-tan/G9-W4 |
 
 ---
 
@@ -71,6 +71,12 @@
 - Lambda Chat runs **outside VPC** (no `vpc_config`) — calls Bedrock API directly via AWS internal network
 - Action Group Lambda runs **inside VPC** — reaches RDS directly, reaches Monitoring API via VPC Interface Endpoint (`com.amazonaws.us-east-1.execute-api`)
 - **No NAT Gateway** needed — all external calls use VPC endpoints or run outside VPC
+
+### System Running
+
+**Live URL:** https://d1alut1mvmxglj.cloudfront.net/
+
+![System Running](./screenshots/system_running.png)
 
 ---
 
