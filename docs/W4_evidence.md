@@ -143,69 +143,92 @@
 
 ## Section 4 — Per-Level Evidence
 
-### L1 — Simple RAG (Retrieval)
+### L1 — Simple RAG (10 questions)
 
-**Test question:** "Who is the Team Platform lead?"
+| ID | Question | Expected Answer | Source |
+|----|----------|----------------|--------|
+| L1-01 | What is the current API rate limit for PaymentGW? | 1000 req/min per merchant | api_reference_v2.md |
+| L1-02 | Who leads Team Platform and what services do they own? | Alex Chen. Owns PaymentGW + AuthSvc | team_platform.md |
+| L1-03 | What was the root cause of the March 5, 2026 PaymentGW outage? | Circuit breaker stuck OPEN due to health check misconfiguration | postmortem_INC005 |
+| L1-04 | What is GeekBrain's data retention policy for transaction logs? | 7 years | security_policy.md |
+| L1-05 | What are GeekBrain's production deployment windows? | Mon-Thu 09:00-17:00 VN. Freeze Fri 18:00 - Mon 08:00 | deployment_policy.md |
+| L1-06 | What authentication method does the PaymentGW API use? | API key + HMAC-SHA256 signature | api_reference_v2.md |
+| L1-07 | What message queue does NotificationSvc use? | Amazon SQS | service_notificationsvc.md |
+| L1-08 | After March 5 incident, circuit breaker review deadline? | April 15, 2026 | postmortem_INC005 |
+| L1-09 | What programming language is AuthSvc written in? | Go | service_authsvc.md |
+| L1-10 | How often does GeekBrain rotate JWT signing keys? | Every 30 days | security_policy.md |
 
-**Expected answer:** Alex Chen (from team_platform.md)
+**Screenshots:**
 
-**Screenshot:**
-
-<!-- TODO: Chụp screenshot frontend hiển thị answer + source tag -->
-![L1 Answer](./screenshots/l1_answer.png)
-
-**Proof — Retrieval happened:**
-
-Frontend displays source document tags (green badges). Agent trace shows `knowledgeBaseLookupOutput` with references from `team_platform.md`.
-
-<!-- TODO: Chụp screenshot frontend showing source tags -->
-![L1 Proof](./screenshots/l1_retrieval_log.png)
-
----
-
-### L2 — Multi-Source Retrieval (Conflict Resolution)
-
-**Test question:** "What is GeekBrain's API rate limit for PaymentGW?"
-
-**Expected answer:** 1000 requests/minute (from api_reference_v2.md, supersedes archived v1 at 500 req/min)
-
-**Screenshot:**
-
-<!-- TODO: Chụp screenshot answer showing "1000" with conflict explanation -->
-![L2 Answer](./screenshots/l2_conflict_resolution.png)
-
-**How the system handles conflicts:**
-
-Agent instruction: *"When documents conflict, prefer the most recent version and status='current' over 'archived'. State the conflict explicitly."* KB contains both `api_reference_v1_archived.md` (500) and `api_reference_v2.md` (1000). Agent identifies v1 as archived and reports current value from v2.
+<!-- TODO: Chụp 1 screenshot cho mỗi question (hoặc gộp nhiều questions/screenshot) -->
+![L1-01](./screenshots/l1_01.png)
+![L1-02](./screenshots/l1_02.png)
+![L1-03](./screenshots/l1_03.png)
+![L1-04](./screenshots/l1_04.png)
+![L1-05](./screenshots/l1_05.png)
+![L1-06](./screenshots/l1_06.png)
+![L1-07](./screenshots/l1_07.png)
+![L1-08](./screenshots/l1_08.png)
+![L1-09](./screenshots/l1_09.png)
+![L1-10](./screenshots/l1_10.png)
 
 ---
 
-### L3 — Tool-Augmented RAG
+### L2 — Multi-Source Retrieval (8 questions)
 
-**Test question:** "What was PaymentGW's total infrastructure cost in Q1 2026?"
+| ID | Question | Expected Answer | Sources |
+|----|----------|----------------|---------|
+| L2-01 | What is PaymentGW's API rate limit? | 1000 (v2 supersedes v1's 500) | v2 + v1_archived |
+| L2-02 | P1 bug in OrderSvc at 21:00 Friday — can they deploy? | Yes. Freeze active but P1 overrides with VP Mark Sullivan approval | deployment + incident_response + team |
+| L2-03 | Which services affected if AuthSvc goes down? | PaymentGW + OrderSvc (direct dependencies) | service_architecture + authsvc |
+| L2-04 | Top priorities for cost reduction and why? | PaymentGW (cost > revenue growth) + FraudDetector (expensive ML) | q1_review + cost_optimization |
+| L2-05 | Common lessons from March 2026 incidents? | Both need automated monitoring/detection | INC005 + INC006 postmortems |
+| L2-06 | What should new Team Data engineer know? | Ryan Blake lead, owns ReportingSvc + FraudDetector, PCI-DSS training | onboarding + team_data |
+| L2-07 | NotificationSvc concerns + proposed fix? | Slow delivery → SQS consumer auto-scaling recommended | q1_review + capacity_planning + arch_review |
+| L2-08 | Complete P1 escalation path for PaymentGW? | Alert → Alex Chen (15min) → Mark Sullivan (30min) → James Wright (1hr) | incident_response + team_platform |
 
-**Expected answer:** $16,500 (SQL: `SELECT SUM(total_cost) FROM monthly_costs WHERE service='PaymentGW' AND month IN ('2026-01','2026-02','2026-03')`)
+**Screenshots:**
 
-**Screenshot:**
+<!-- TODO: Chụp screenshot cho mỗi question -->
+![L2-01](./screenshots/l2_01.png)
+![L2-02](./screenshots/l2_02.png)
+![L2-03](./screenshots/l2_03.png)
+![L2-04](./screenshots/l2_04.png)
+![L2-05](./screenshots/l2_05.png)
+![L2-06](./screenshots/l2_06.png)
+![L2-07](./screenshots/l2_07.png)
+![L2-08](./screenshots/l2_08.png)
 
-<!-- TODO: Chụp screenshot answer showing $16,500 + tool badge -->
-![L3 Answer](./screenshots/l3_cost_answer.png)
+---
 
-**Proof — Tool call happened:**
+### L3 — Tool-Augmented RAG (10 questions)
 
-Frontend shows:
-- Purple tool badge: `query_database`
-- Collapsible "Query Details" showing SQL executed
+| ID | Question | Expected Answer | Tool Needed |
+|----|----------|----------------|-------------|
+| L3-01 | What is PaymentGW's current p99 latency? | ~185ms | get_service_metrics |
+| L3-02 | Total infrastructure cost across ALL services in Q1 2026? | $56,350 | query_database |
+| L3-03 | Which service had highest total cost in March 2026? | PaymentGW at $7,500 | query_database |
+| L3-04 | Is PaymentGW's current error rate within SLA target? | Yes. 0.08% vs target 0.1% | metrics + DB |
+| L3-05 | Compare PaymentGW current p99 to Q1 daily average? | Current ~185ms vs avg ~183ms (slightly above) | metrics + DB |
+| L3-06 | Is NotificationSvc meeting its SLA targets? | No. Latency 3200ms > 2000ms target, error 2.1% > 1.0% target | metrics + DB |
+| L3-07 | PaymentGW cost increase Q4 2025 → Q1 2026? | Q4=$11,700 → Q1=$16,500. +$4,800 (+41%) | query_database |
+| L3-08 | Which service handles most requests per minute? | AuthSvc at ~28,000 rpm | get_service_metrics (multiple) |
+| L3-09 | FraudDetector CPU utilization vs other services? | FraudDetector 72%. NotificationSvc highest at 88% | get_service_metrics (multiple) |
+| L3-10 | Total incidents in Q1 2026? Which service had most? | 7 incidents. PaymentGW had 3 (most) | query_database |
 
-<!-- TODO: Chụp screenshot showing tool badge + expanded query details -->
-![L3 Tool Call Proof](./screenshots/l3_tool_call_log.png)
+**Screenshots:**
 
-**Additional L3 test:** "What is PaymentGW's current p99 latency?"
-
-**Expected answer:** ~185ms (from `get_service_metrics` tool → Monitoring API)
-
-<!-- TODO: Chụp screenshot -->
-![L3 Metrics Answer](./screenshots/l3_metrics_answer.png)
+<!-- TODO: Chụp screenshot cho mỗi question, showing tool badge + answer -->
+![L3-01](./screenshots/l3_01.png)
+![L3-02](./screenshots/l3_02.png)
+![L3-03](./screenshots/l3_03.png)
+![L3-04](./screenshots/l3_04.png)
+![L3-05](./screenshots/l3_05.png)
+![L3-06](./screenshots/l3_06.png)
+![L3-07](./screenshots/l3_07.png)
+![L3-08](./screenshots/l3_08.png)
+![L3-09](./screenshots/l3_09.png)
+![L3-10](./screenshots/l3_10.png)
 
 **Tools registered with Bedrock Agent Action Group:**
 
@@ -233,7 +256,7 @@ Frontend shows:
 
 **Screenshot:**
 
-<!-- TODO: Chụp screenshot showing 4-turn conversation -->
+<!-- TODO: Chụp screenshot showing full 4-turn conversation -->
 ![L4 Conversation](./screenshots/l4_multiturn.png)
 
 **Memory strategy:** Bedrock Agent session management via `sessionId`. Each `invoke_agent()` call passes the same session ID. Agent maintains context within session (idle TTL: 1800s). Frontend generates unique session ID per browser session via `sessionStorage`.
