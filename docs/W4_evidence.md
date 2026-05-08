@@ -15,89 +15,58 @@
 
 ## Section 2 — Architecture Overview
 
-### System Architecture
+### System Architecture Diagram
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                         CloudFront (CDN)                                  │
-│                    frontend/ → S3 Static Website                          │
-└────────────────────────────────┬────────────────────────────────────────┘
-                                 │ POST /chat
-                                 ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                    API Gateway (Regional, /prod)                          │
-└────────────────────────────────┬────────────────────────────────────────┘
-                                 │
-                                 ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│              Lambda: geekbrain-chat (lambda_function.py)                  │
-│              Invokes Bedrock Agent via InvokeAgent API                    │
-└────────────────────────────────┬────────────────────────────────────────┘
-                                 │
-                                 ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                     Bedrock Agent (DeepSeek V3.2)                         │
-│  ┌──────────────────────┐        ┌────────────────────────────────────┐ │
-│  │   Knowledge Base      │        │   Action Group (Tools)              │ │
-│  │   36 markdown docs    │        │   → Lambda: geekbrain-action-group │ │
-│  │   S3 → OpenSearch     │        │     (action_group_function.py)     │ │
-│  │   Serverless (AOSS)   │        │                                    │ │
-│  │   Titan Embed v2      │        │   Tools:                           │ │
-│  │   Hierarchical chunks │        │   • query_database → RDS PostgreSQL│ │
-│  └──────────────────────┘        │   • get_service_status → Mon. API  │ │
-│                                   │   • get_service_metrics → Mon. API │ │
-│                                   │   • list_services → Mon. API       │ │
-│                                   │   • get_incident_history → Mon. API│ │
-│                                   │   • compare_services → Mon. API    │ │
-│                                   └─────────────┬──────────────────────┘ │
-└─────────────────────────────────────────────────┼────────────────────────┘
-                                                  │
-                          ┌───────────────────────┼───────────────────────┐
-                          │                       │                       │
-                          ▼                       ▼                       ▼
-              ┌──────────────────┐   ┌──────────────────┐   ┌──────────────────┐
-              │  RDS PostgreSQL   │   │  Monitoring API   │   │  VPC Network     │
-              │  (Private Subnet) │   │  (FastAPI+Mangum) │   │  Private Subnets │
-              │                   │   │  Lambda + APIGW   │   │  Security Groups │
-              │  Tables:          │   │                   │   │  VPC Endpoint    │
-              │  • monthly_costs  │   │  Endpoints:       │   └──────────────────┘
-              │  • incidents      │   │  /status/{svc}    │
-              │  • sla_targets    │   │  /metrics/{svc}   │
-              │  • daily_metrics  │   │  /services        │
-              └──────────────────┘   │  /incidents       │
-                                     └──────────────────┘
-```
+> See `docs/diagrams/w4_architecture.drawio` — open in draw.io and export PNG for slides.
+
+![System Architecture](./diagrams/w4_architecture.png)
+
+### Request Flow Diagram
+
+> See `docs/diagrams/w4_request_flow.drawio`
+
+![Request Flow](./diagrams/w4_request_flow.png)
+
+### Tool Routing Diagram
+
+> See `docs/diagrams/w4_tool_routing.drawio`
+
+![Tool Routing](./diagrams/w4_tool_routing.png)
 
 ### Component List
 
-| Component | Role |
-|-----------|------|
-| **CloudFront + S3** | Hosts chat frontend (HTML/CSS/JS) |
-| **API Gateway** | REST API endpoint, routes POST /chat to Lambda |
-| **Lambda (chat)** | Entry point — invokes Bedrock Agent with user question |
-| **Bedrock Agent** | Orchestrates KB retrieval + tool calling + LLM reasoning |
-| **Knowledge Base** | RAG pipeline: S3 docs → Titan Embed v2 → OpenSearch Serverless → vector search |
-| **Action Group Lambda** | Executes tools (DB queries, API calls) in VPC |
-| **RDS PostgreSQL** | Stores structured data (costs, incidents, SLAs, daily metrics) |
-| **Monitoring API Lambda** | FastAPI app returning live service metrics via Mangum |
-| **VPC + Subnets** | Network isolation for RDS access from Action Group Lambda |
+| Component | Scope | Role |
+|-----------|-------|------|
+| **CloudFront + S3** | Global | Hosts chat frontend (HTML/CSS/JS) |
+| **API Gateway (Chat)** | Regional | REST endpoint, routes POST /chat to Lambda |
+| **Lambda Chat** | Regional (outside VPC) | Invokes Bedrock Agent directly via AWS network |
+| **Bedrock Agent** | Regional | Orchestrates KB retrieval + tool calling + LLM reasoning |
+| **Knowledge Base** | Regional | RAG: S3 docs → Titan Embed v2 → OpenSearch Serverless |
+| **OpenSearch Serverless** | Regional | Vector store (HNSW, 1024d) |
+| **Action Group Lambda** | VPC (private subnet) | Executes 6 tools (DB queries, API calls) |
+| **RDS PostgreSQL** | VPC (private subnet) | Structured data (costs, incidents, SLAs, metrics) |
+| **Monitoring API Lambda** | VPC (private subnet) | FastAPI+Mangum returning live service metrics |
+| **API Gateway (Monitoring)** | Regional | Exposes Monitoring API to Action Group Lambda |
+| **VPC Interface Endpoint** | VPC border | Routes execute-api calls without internet/NAT |
 
 ### Data Flow
 
 1. User types question in frontend → POST to API Gateway `/prod/chat`
-2. API Gateway triggers `geekbrain-chat` Lambda
-3. Lambda calls `bedrock-agent-runtime.invoke_agent()` with question + session_id
+2. API Gateway triggers `geekbrain-chat` Lambda (outside VPC)
+3. Lambda calls `bedrock-agent-runtime.invoke_agent()` with question + session_id (AWS internal network, no NAT needed)
 4. Bedrock Agent decides: retrieve from KB, call tool, or both
 5. If KB needed → retrieves relevant chunks from OpenSearch Serverless
-6. If tool needed → invokes Action Group Lambda with function name + params
-7. Action Group Lambda executes tool (SQL query or HTTP to Monitoring API)
+6. If tool needed → invokes Action Group Lambda (in VPC private subnet)
+7. Action Group Lambda executes tool:
+   - **query_database** → RDS PostgreSQL (same VPC, SG allows port 5432)
+   - **get_service_metrics/status** → Monitoring API via VPC Interface Endpoint (no internet)
 8. Agent synthesizes KB chunks + tool results → generates final answer
 9. Response streams back through Lambda → API Gateway → frontend
 
-**Screenshot of system running:**
-
-<!-- TODO: Insert screenshot of deployed frontend or CloudFront URL -->
-![System Running](./screenshots/system_running.png)
+**Key networking decisions:**
+- Lambda Chat runs **outside VPC** (no `vpc_config`) — calls Bedrock API directly via AWS internal network
+- Action Group Lambda runs **inside VPC** — reaches RDS directly, reaches Monitoring API via VPC Interface Endpoint (`com.amazonaws.us-east-1.execute-api`)
+- **No NAT Gateway** needed — all external calls use VPC endpoints or run outside VPC
 
 ---
 
@@ -109,25 +78,25 @@
 
 **What we learned:** Bedrock Agents handle the tool-calling loop automatically — the agent decides when to retrieve from KB vs call a tool. This eliminated the need to write custom routing logic. Trade-off: less control over exactly when tools are called, but faster to production.
 
-### Decision 2: RDS PostgreSQL vs SQLite/DynamoDB
+### Decision 2: VPC Interface Endpoint vs NAT Gateway
 
-**Chose:** RDS PostgreSQL in private subnets, accessed via VPC-connected Lambda
+**Chose:** VPC Interface Endpoint for API Gateway (`execute-api`) instead of NAT Gateway
 
-**What we learned:** PostgreSQL gives full SQL capability for complex queries (JOINs, aggregations, date ranges). The VPC setup was more complex than SQLite-in-Lambda but matches production architecture. Required configuring security groups and private subnets correctly.
+**What we learned:** The Action Group Lambda needs to call the Monitoring API (behind a separate API Gateway). Instead of routing through NAT → internet → API GW, we use a VPC Interface Endpoint with `private_dns_enabled = true`. This keeps traffic on AWS backbone, removes NAT Gateway cost (~$32/month), and reduces latency.
 
-### Decision 3: Hierarchical Chunking Strategy
+### Decision 3: Lambda Chat Outside VPC
 
-**Chose:** Hierarchical chunking (parent: 1500 tokens, child: 300 tokens, 60 token overlap)
+**Chose:** Lambda Chat without `vpc_config` (runs in AWS-managed network)
 
-**What we learned:** Initial testing with fixed-size chunks (300 tokens) caused context loss for long policy documents. Hierarchical chunking preserves document structure — the parent chunk provides broader context while child chunks enable precise retrieval. This improved L2 multi-doc synthesis significantly.
+**What we learned:** Lambda Chat only calls Bedrock Agent API — it doesn't need VPC access. Running outside VPC avoids cold start delays from ENI attachment (~5-10s), eliminates NAT dependency, and simplifies the network architecture.
 
 ### What Didn't Work
 
 **Tried:** DeepSeek V3.2 model configuration via Terraform `foundation_model` parameter.
 
-**Failed because:** The Bedrock API returned errors when trying to set DeepSeek V3.2 programmatically — the model required console configuration.
+**Failed because:** The Bedrock API returned errors when trying to set DeepSeek V3.2 programmatically.
 
-**Switched to:** Setting `lifecycle { ignore_changes = [foundation_model] }` in Terraform and configuring the model manually in the Bedrock console. This hybrid approach works but means model changes aren't fully IaC-managed.
+**Switched to:** `lifecycle { ignore_changes = [foundation_model] }` in Terraform + manual console configuration.
 
 ---
 
@@ -141,14 +110,14 @@
 
 **Screenshot:**
 
-<!-- TODO: Insert screenshot of L1 answer -->
+<!-- TODO: Chụp screenshot frontend hiển thị answer + source tag -->
 ![L1 Answer](./screenshots/l1_answer.png)
 
 **Proof — Retrieval happened:**
 
-The frontend displays source document tags (green badges) below each answer. CloudWatch logs show the Bedrock Agent trace with `knowledgeBaseLookupOutput` containing retrieved references from `team_platform.md`.
+Frontend displays source document tags (green badges). Agent trace shows `knowledgeBaseLookupOutput` with references from `team_platform.md`.
 
-<!-- TODO: Insert screenshot of CloudWatch logs or frontend source tags -->
+<!-- TODO: Chụp screenshot frontend showing source tags -->
 ![L1 Proof](./screenshots/l1_retrieval_log.png)
 
 ---
@@ -157,16 +126,16 @@ The frontend displays source document tags (green badges) below each answer. Clo
 
 **Test question:** "What is GeekBrain's API rate limit for PaymentGW?"
 
-**Expected answer:** 1000 requests/minute (from api_reference_v2.md, which supersedes the archived v1 at 500 req/min)
+**Expected answer:** 1000 requests/minute (from api_reference_v2.md, supersedes archived v1 at 500 req/min)
 
 **Screenshot:**
 
-<!-- TODO: Insert screenshot of L2 answer showing conflict resolution -->
+<!-- TODO: Chụp screenshot answer showing "1000" with conflict explanation -->
 ![L2 Answer](./screenshots/l2_conflict_resolution.png)
 
 **How the system handles conflicts:**
 
-The Bedrock Agent instruction includes: *"When documents conflict, prefer the most recent version and status='current' over 'archived'. State the conflict explicitly."* The KB contains both `api_reference_v1_archived.md` (500 req/min) and `api_reference_v2.md` (1000 req/min). The agent retrieves both, identifies v1 as archived, and reports the current value from v2.
+Agent instruction: *"When documents conflict, prefer the most recent version and status='current' over 'archived'. State the conflict explicitly."* KB contains both `api_reference_v1_archived.md` (500) and `api_reference_v2.md` (1000). Agent identifies v1 as archived and reports current value from v2.
 
 ---
 
@@ -174,29 +143,27 @@ The Bedrock Agent instruction includes: *"When documents conflict, prefer the mo
 
 **Test question:** "What was PaymentGW's total infrastructure cost in Q1 2026?"
 
-**Expected answer:** $16,500 (from database: `SELECT SUM(total_cost) FROM monthly_costs WHERE service='PaymentGW' AND month IN ('2026-01','2026-02','2026-03')`)
+**Expected answer:** $16,500 (SQL: `SELECT SUM(total_cost) FROM monthly_costs WHERE service='PaymentGW' AND month IN ('2026-01','2026-02','2026-03')`)
 
 **Screenshot:**
 
-<!-- TODO: Insert screenshot of L3 answer with correct number -->
+<!-- TODO: Chụp screenshot answer showing $16,500 + tool badge -->
 ![L3 Answer](./screenshots/l3_cost_answer.png)
 
 **Proof — Tool call happened:**
 
-The frontend shows:
+Frontend shows:
 - Purple tool badge: `query_database`
-- Collapsible "Query Details" section showing the exact SQL executed
+- Collapsible "Query Details" showing SQL executed
 
-CloudWatch logs show the Action Group event with `function=query_database` and the SQL parameter.
-
-<!-- TODO: Insert screenshot showing tool badge + query details in frontend -->
+<!-- TODO: Chụp screenshot showing tool badge + expanded query details -->
 ![L3 Tool Call Proof](./screenshots/l3_tool_call_log.png)
 
 **Additional L3 test:** "What is PaymentGW's current p99 latency?"
 
-**Expected answer:** ~185ms (from Monitoring API via `get_service_metrics` tool)
+**Expected answer:** ~185ms (from `get_service_metrics` tool → Monitoring API)
 
-<!-- TODO: Insert screenshot -->
+<!-- TODO: Chụp screenshot -->
 ![L3 Metrics Answer](./screenshots/l3_metrics_answer.png)
 
 **Tools registered with Bedrock Agent Action Group:**
@@ -219,47 +186,45 @@ CloudWatch logs show the Action Group event with `function=query_database` and t
 | Turn | User Question | Expected Resolution |
 |------|--------------|-------------------|
 | 1 | "Which service had the highest infrastructure cost in March 2026?" | → query_database → PaymentGW at $7,500 |
-| 2 | "Why did its costs spike?" | Resolve "its" = PaymentGW → KB retrieval → postmortem INC-005 (circuit breaker incident) |
-| 3 | "Which team is responsible?" | Resolve context = PaymentGW → Team Platform, led by Alex Chen |
-| 4 | "The postmortem mentioned a review deadline. Is it overdue?" | Retrieve deadline (April 15) → compare to current date → Yes, overdue |
+| 2 | "Why did its costs spike?" | Resolve "its" = PaymentGW → KB retrieval → postmortem INC-005 |
+| 3 | "Which team is responsible?" | Resolve context → Team Platform, led by Alex Chen |
+| 4 | "The postmortem mentioned a review deadline. Is it overdue?" | Retrieve deadline (April 15) → compare to current date → Yes |
 
 **Screenshot:**
 
-<!-- TODO: Insert screenshot showing multi-turn conversation -->
+<!-- TODO: Chụp screenshot showing 4-turn conversation -->
 ![L4 Conversation](./screenshots/l4_multiturn.png)
 
-**Memory strategy:** Bedrock Agent session management via `sessionId` parameter. Each `invoke_agent()` call passes the same session ID, and the agent maintains conversation context automatically within the session (idle TTL: 1800 seconds). The frontend generates a unique session ID per browser session via `sessionStorage`.
+**Memory strategy:** Bedrock Agent session management via `sessionId`. Each `invoke_agent()` call passes the same session ID. Agent maintains context within session (idle TTL: 1800s). Frontend generates unique session ID per browser session via `sessionStorage`.
 
 ---
 
 ### Bonus A — Observability Dashboard
 
-The frontend itself acts as a lightweight observability layer. Each assistant response displays:
+Frontend displays pipeline internals alongside each answer:
 
 - **Source tags** (green) — which KB documents were cited
 - **Tool badges** (purple) — which tools were called
-- **Query Details** (collapsible) — exact parameters passed to each tool (e.g., SQL query text)
+- **Query Details** (collapsible) — exact SQL/parameters passed to each tool
 
-This is implemented in `frontend/app.js` by parsing the API response fields: `sources`, `tools_used`, and `tool_details` returned by the chat Lambda.
+Implemented in `frontend/app.js` by parsing response fields: `sources`, `tools_used`, `tool_details`.
 
 **Screenshot:**
 
-<!-- TODO: Insert screenshot of frontend showing tool badges, source tags, and query details -->
+<!-- TODO: Chụp screenshot showing tool badges + source tags + query details expanded -->
 ![Bonus A Observability](./screenshots/bonus_a_observability.png)
 
 ---
 
 ### Bonus C — Knowledge Base Sync
 
-KB sync is automated via Terraform. When documents in S3 change (detected via MD5 hash comparison), `terraform apply` triggers:
+KB sync automated via Terraform:
 
-1. Upload updated `.md` files to S3
+1. Upload `.md` files to S3 (detected via MD5 hash)
 2. `null_resource.kb_sync` calls `aws bedrock-agent start-ingestion-job`
-3. Polls until ingestion status = COMPLETE (timeout: 10 minutes)
+3. Polls until status = COMPLETE (timeout: 10 min)
 
-This ensures the KB stays current with document changes without manual intervention.
-
-**Evidence:** See `terraform/modules/ai_engine/main.tf` — the `kb_sync` resource with `docs_hash` trigger.
+**Evidence:** `terraform/modules/ai_engine/main.tf` — `kb_sync` resource with `docs_hash` trigger.
 
 ---
 
@@ -267,32 +232,30 @@ This ensures the KB stays current with document changes without manual intervent
 
 **Hardest level:** L3 — Tool-Augmented RAG
 
-**Why:** The challenge was not writing the tool functions themselves, but getting the Bedrock Agent to route correctly between KB retrieval and tool calls. Tool descriptions had to be extremely precise about when to use each tool (current/live data vs historical data). Vague descriptions caused the agent to guess numbers from documents instead of querying the database. We iterated on tool descriptions multiple times before the agent consistently chose `query_database` for cost questions.
+**Why:** Getting the Bedrock Agent to route correctly between KB retrieval and tool calls required extremely precise tool descriptions. "Gets data" is useless — "Returns CURRENT live metrics; for HISTORICAL data use query_database" made the difference. We iterated on descriptions multiple times before the agent consistently chose the right tool.
 
 **What we would do differently with one more day:**
 
-- Add query rewriting for L4 to improve retrieval accuracy on follow-up questions with pronouns
-- Implement automated testing using the provided question JSON files (`W4/questions/student/`) to measure accuracy across all levels before the demo
-- Add fallback error messages when the Monitoring API is unreachable instead of letting the agent hallucinate
+- Add query rewriting for L4 to improve retrieval on follow-up questions with pronouns
+- Implement automated testing with the provided question JSON files to measure accuracy
+- Add fallback error messages when the Monitoring API is unreachable
 
 ---
 
 ## Appendix — Infrastructure as Code
 
-All infrastructure managed via Terraform (`terraform/` directory):
-
 ```bash
 cd terraform
-terraform init    # Initialize providers + backend
-terraform plan    # Preview changes
-terraform apply   # Deploy all resources (~15 min for full stack)
+terraform init
+terraform plan
+terraform apply   # ~15 min for full stack
 ```
 
-| Module | Resources Created |
-|--------|-------------------|
-| `ai_engine` | S3 bucket, OpenSearch Serverless, Bedrock KB + data source, ingestion job |
-| `backend` | Bedrock Agent + alias, Action Group, 2 Lambdas, API Gateway |
-| `monitoring_api` | FastAPI Lambda, API Gateway |
+| Module | Resources |
+|--------|-----------|
+| `ai_engine` | S3 bucket, OpenSearch Serverless, Bedrock KB + data source, ingestion |
+| `backend` | Bedrock Agent + alias, Action Group, Lambda Chat, Lambda AG, API Gateway |
+| `monitoring_api` | FastAPI Lambda, API Gateway (Monitoring) |
 | `database` | RDS PostgreSQL, seed Lambda |
-| `network` | VPC, 2 private subnets, security groups, VPC endpoint |
+| `network` | VPC, 2 public + 2 private subnets, SGs, VPC Interface Endpoint (execute-api) |
 | `frontend` | S3 bucket, CloudFront distribution |
