@@ -5,10 +5,11 @@
 | Field | Value |
 |-------|-------|
 | **Group** | Group 9 |
-| **Members** | <!-- TODO: Add member names --> |
+| **Members** | 1. Lê Hoàng Trung Kiên<br>2. Trần Đình Bảo Long<br>3. Nguyễn Đức Chinh<br>4. Nguyễn Hữu Định<br>5. Trương Thị Mỹ Quyên<br>6. Trần Văn Đức<br>7.Hoàng Trọng Tấn
+| **Mentor** | Anh Quang Phùng (Quality Assurance Lead, TechX) |
 | **LLM** | DeepSeek V3.2 via Amazon Bedrock |
 | **Framework** | Amazon Bedrock Agents (managed orchestration) |
-| **Repository** | <!-- TODO: Add repo URL --> |
+| **Repository** | |
 
 ---
 
