@@ -39,13 +39,53 @@
                     </div>
                 </div>
                 <div class="info-section">
-                    <h3 class="info-title">Quick Prompts</h3>
-                    <div class="quick-prompts">
-                        <button class="prompt-btn" data-prompt="Who leads Team Platform and what services do they own?">👤 Team Platform lead</button>
-                        <button class="prompt-btn" data-prompt="What is the current API rate limit for PaymentGW?">🔑 API rate limit</button>
-                        <button class="prompt-btn" data-prompt="What are GeekBrain's production deployment windows?">🚀 Deploy windows</button>
-                        <button class="prompt-btn" data-prompt="If Team Commerce has a P1 bug on Friday night, can they deploy a fix?">⚠️ P1 Friday deploy</button>
-                        <button class="prompt-btn" data-prompt="What was the root cause of the March 5 PaymentGW outage?">🔥 March outage</button>
+                    <h3 class="info-title">Test Questions</h3>
+                    <div class="question-levels" id="question-levels">
+                        <!-- L1 -->
+                        <div class="level-group" data-level="1">
+                            <button class="level-header" data-level="1">
+                                <span class="level-badge l1">L1</span>
+                                <span class="level-name">Single-Fact Retrieval</span>
+                                <span class="level-chevron">▸</span>
+                            </button>
+                            <div class="level-questions" id="level-1-questions"></div>
+                        </div>
+                        <!-- L2 -->
+                        <div class="level-group" data-level="2">
+                            <button class="level-header" data-level="2">
+                                <span class="level-badge l2">L2</span>
+                                <span class="level-name">Multi-Source Reasoning</span>
+                                <span class="level-chevron">▸</span>
+                            </button>
+                            <div class="level-questions" id="level-2-questions"></div>
+                        </div>
+                        <!-- L3 -->
+                        <div class="level-group" data-level="3">
+                            <button class="level-header" data-level="3">
+                                <span class="level-badge l3">L3</span>
+                                <span class="level-name">Grounded Computation</span>
+                                <span class="level-chevron">▸</span>
+                            </button>
+                            <div class="level-questions" id="level-3-questions"></div>
+                        </div>
+                        <!-- L4 -->
+                        <div class="level-group" data-level="4">
+                            <button class="level-header" data-level="4">
+                                <span class="level-badge l4">L4</span>
+                                <span class="level-name">Conversational Memory</span>
+                                <span class="level-chevron">▸</span>
+                            </button>
+                            <div class="level-questions" id="level-4-questions"></div>
+                        </div>
+                        <!-- L5 -->
+                        <div class="level-group" data-level="5">
+                            <button class="level-header" data-level="5">
+                                <span class="level-badge l5">L5</span>
+                                <span class="level-name">Investigation</span>
+                                <span class="level-chevron">▸</span>
+                            </button>
+                            <div class="level-questions" id="level-5-questions"></div>
+                        </div>
                     </div>
                 </div>
             </div>

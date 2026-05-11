@@ -10,6 +10,8 @@ import boto3
 AGENT_ID = os.environ.get("AGENT_ID", "")
 AGENT_ALIAS_ID = os.environ.get("AGENT_ALIAS_ID", "")
 AWS_REGION = os.environ.get("AWS_REGION_NAME", "us-east-1")
+KNOWLEDGE_BASE_ID = os.environ.get("KNOWLEDGE_BASE_ID", "")
+RETRIEVAL_K = int(os.environ.get("RETRIEVAL_K", "10"))
 
 bedrock_agent_runtime = boto3.client("bedrock-agent-runtime", region_name=AWS_REGION)
 
@@ -58,13 +60,31 @@ def handler(event, context):
 
 def invoke_agent(question, session_id):
     """Invoke Bedrock Agent and collect the streamed response."""
-    response = bedrock_agent_runtime.invoke_agent(
+    invoke_params = dict(
         agentId=AGENT_ID,
         agentAliasId=AGENT_ALIAS_ID,
         sessionId=session_id,
         inputText=question,
         enableTrace=True,
     )
+
+    # Override KB retrieval: Top K + Hybrid Search (Vector + BM25)
+    if KNOWLEDGE_BASE_ID:
+        invoke_params["sessionState"] = {
+            "knowledgeBaseConfigurations": [
+                {
+                    "knowledgeBaseId": KNOWLEDGE_BASE_ID,
+                    "retrievalConfiguration": {
+                        "vectorSearchConfiguration": {
+                            "numberOfResults": RETRIEVAL_K,
+                            "overrideSearchType": "HYBRID"
+                        }
+                    }
+                }
+            ]
+        }
+
+    response = bedrock_agent_runtime.invoke_agent(**invoke_params)
 
     answer = ""
     trace_info = {"tools_used": [], "sources": [], "tool_details": [], "pipeline_traces": [], "raw_citations": []}

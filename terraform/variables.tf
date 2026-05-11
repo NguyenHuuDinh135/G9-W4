@@ -31,5 +31,5 @@ variable "retrieval_k" {
 variable "kb_docs_path" {
   description = "Local path to knowledge base markdown files"
   type        = string
-  default     = "../../data_package/knowledge_base"
+  default     = "../data_package/knowledge_base"
 }

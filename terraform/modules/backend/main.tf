@@ -57,9 +57,11 @@ resource "aws_lambda_function" "chat" {
 
   environment {
     variables = {
-      AGENT_ID       = aws_bedrockagent_agent.main.agent_id
-      AGENT_ALIAS_ID = aws_bedrockagent_agent_alias.prod.agent_alias_id
-      AWS_REGION_NAME = var.region
+      AGENT_ID          = aws_bedrockagent_agent.main.agent_id
+      AGENT_ALIAS_ID    = aws_bedrockagent_agent_alias.prod.agent_alias_id
+      AWS_REGION_NAME   = var.region
+      KNOWLEDGE_BASE_ID = var.knowledge_base_id
+      RETRIEVAL_K       = tostring(var.retrieval_k)
     }
   }
 
@@ -226,6 +228,9 @@ RULES:
 8. Be EXTREMELY concise. Keep your answers under 100 words to prevent system timeouts. Do not over-explain.
 9. When comparing services, use the compare_services tool for accurate data.
 10. To save time, if compare_services gives you the metric value, DO NOT also call get_service_metrics.
+11. EFFICIENCY: If the knowledge base already returned relevant chunks that answer the question, respond IMMEDIATELY. Do NOT re-query the knowledge base for the same question or similar information.
+12. For simple factual questions (who, what, where), ONE knowledge base lookup is enough. Do NOT do multiple lookups.
+13. NEVER call the same tool twice with the same or similar parameters. If you already have the data, use it.
 
 DATABASE SCHEMA (for query_database tool):
 - monthly_costs: service, month, compute_cost, storage_cost, network_cost, third_party_cost, total_cost
