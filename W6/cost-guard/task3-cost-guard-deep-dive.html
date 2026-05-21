@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>W6 Task 3 — Cost Guard Lambda Deep Dive</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #08090a;
+      --panel: #0f1011;
+      --surface: #17191d;
+      --surface-2: #1f2228;
+      --text: #f7f8f8;
+      --muted: #a8b0bd;
+      --dim: #6d7480;
+      --line: rgba(255,255,255,.08);
+      --line-strong: rgba(255,255,255,.16);
+      --accent: #fe7624;
+      --accent-2: #00b3d9;
+      --amber: #fbae42;
+      --violet: #7170ff;
+      --green: #22c55e;
+      --red: #ef4444;
+      --navy: #1e293b;
+      --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      --sans: 'Inter', system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; width: 100%; height: 100%; background: var(--bg); color: var(--text); font-family: var(--sans); overflow: hidden; }
+    body { font-feature-settings: "cv01", "ss03"; }
+
+    .deck {
+      width: 100vw;
+      height: 100vh;
+      position: relative;
+      background:
+        radial-gradient(circle at 16% 8%, rgba(254,118,36,.18), transparent 30%),
+        radial-gradient(circle at 84% 18%, rgba(0,179,217,.15), transparent 28%),
+        linear-gradient(180deg, #08090a 0%, #0b0d10 60%, #060708 100%);
+    }
+
+    .slide {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      padding: 72px 92px 88px;
+      display: none;
+      overflow: hidden;
+    }
+    .slide.active { display: flex; flex-direction: column; }
+
+    .slide::before {
+      content: "";
+      position: absolute;
+      inset: 18px;
+      border: 1px solid rgba(255,255,255,.055);
+      border-radius: 28px;
+      pointer-events: none;
+    }
+
+    .eyebrow { font: 600 15px/1 var(--mono); color: var(--accent); letter-spacing: .08em; text-transform: uppercase; margin-bottom: 18px; }
+    h1, h2, h3, p { margin: 0; }
+    h1 { font-size: clamp(54px, 5.4vw, 92px); line-height: .94; letter-spacing: -0.06em; font-weight: 600; max-width: 1180px; }
+    h2 { font-size: clamp(38px, 4vw, 68px); line-height: .98; letter-spacing: -0.05em; font-weight: 600; max-width: 1180px; }
+    h3 { font-size: 28px; line-height: 1.15; letter-spacing: -0.03em; font-weight: 600; }
+    .lead { color: var(--muted); font-size: 26px; line-height: 1.42; max-width: 980px; margin-top: 26px; }
+    .small { color: var(--muted); font-size: 18px; line-height: 1.5; }
+    .muted { color: var(--muted); }
+    .dim { color: var(--dim); }
+    .accent { color: var(--accent); }
+    .cyan { color: var(--accent-2); }
+    .amber { color: var(--amber); }
+    .green { color: var(--green); }
+    .red { color: var(--red); }
+    .mono { font-family: var(--mono); }
+
+    .header { position: relative; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 32px; margin-bottom: 42px; }
+    .title-area { position: relative; z-index: 2; }
+    .body { position: relative; z-index: 2; flex: 1; display: flex; flex-direction: column; justify-content: center; min-height: 0; }
+    .footer { position: absolute; left: 92px; right: 92px; bottom: 34px; height: 28px; display: flex; align-items: center; justify-content: space-between; color: var(--dim); font: 500 13px/1 var(--mono); z-index: 5; }
+    .progress { position: absolute; left: 0; bottom: 0; height: 3px; width: 100%; background: rgba(255,255,255,.06); z-index: 6; }
+    .progress span { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--accent), var(--accent-2)); transition: width .22s ease; }
+
+    .pill { display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 999px; background: rgba(255,255,255,.03); color: #d9dde5; font: 500 14px/1 var(--mono); }
+    .pill.dot::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 18px rgba(34,197,94,.55); }
+
+    .grid { display: grid; gap: 22px; }
+    .grid.cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .grid.cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .grid.cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+    .card { background: linear-gradient(180deg, rgba(255,255,255,.055), rgba(255,255,255,.025)); border: 1px solid var(--line); border-radius: 22px; padding: 26px; box-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 20px 60px rgba(0,0,0,.2); }
+    .card.strong { border-color: rgba(254,118,36,.34); background: linear-gradient(180deg, rgba(254,118,36,.14), rgba(255,255,255,.025)); }
+    .card.cyan-card { border-color: rgba(0,179,217,.34); background: linear-gradient(180deg, rgba(0,179,217,.12), rgba(255,255,255,.025)); }
+    .card.green-card { border-color: rgba(34,197,94,.34); background: linear-gradient(180deg, rgba(34,197,94,.12), rgba(255,255,255,.025)); }
+    .card h3 { margin-bottom: 14px; }
+    .card p, .card li { color: var(--muted); font-size: 20px; line-height: 1.45; }
+    ul { margin: 16px 0 0; padding-left: 22px; }
+    li + li { margin-top: 10px; }
+
+    .hero-layout { display: grid; grid-template-columns: 1.08fr .92fr; gap: 56px; align-items: center; flex: 1; }
+    .architecture { position: relative; min-height: 580px; border-radius: 28px; border: 1px solid var(--line); background: radial-gradient(circle at 50% 16%, rgba(113,112,255,.24), transparent 32%), rgba(255,255,255,.025); padding: 34px; overflow: hidden; }
+    .node { position: absolute; min-width: 220px; padding: 18px 20px; border: 1px solid rgba(255,255,255,.12); border-radius: 18px; background: rgba(15,16,17,.82); box-shadow: 0 18px 48px rgba(0,0,0,.34); backdrop-filter: blur(8px); }
+    .node b { display: block; font-size: 18px; margin-bottom: 8px; }
+    .node span { display: block; color: var(--muted); font: 500 13px/1.35 var(--mono); }
+    .n1 { left: 34px; top: 56px; } .n2 { right: 38px; top: 56px; } .n3 { left: 50%; transform: translateX(-50%); top: 238px; border-color: rgba(254,118,36,.45); } .n4 { left: 54px; bottom: 68px; } .n5 { right: 54px; bottom: 68px; }
+    .line { position: absolute; height: 2px; background: linear-gradient(90deg, transparent, rgba(254,118,36,.8), transparent); transform-origin: left center; opacity: .8; }
+    .l1 { left: 260px; top: 154px; width: 246px; transform: rotate(22deg); } .l2 { right: 260px; top: 154px; width: 246px; transform: rotate(158deg); } .l3 { left: 232px; bottom: 192px; width: 275px; transform: rotate(-28deg); } .l4 { right: 232px; bottom: 192px; width: 275px; transform: rotate(208deg); }
+
+    .code { border: 1px solid var(--line); background: #0b0c0e; border-radius: 20px; overflow: hidden; box-shadow: 0 24px 70px rgba(0,0,0,.35); }
+    .code .bar { display: flex; gap: 7px; align-items: center; padding: 13px 16px; background: rgba(255,255,255,.04); border-bottom: 1px solid var(--line); color: var(--dim); font: 500 13px/1 var(--mono); }
+    .dot { width: 10px; height: 10px; border-radius: 50%; background: #ff5f57; } .dot:nth-child(2) { background: #ffbd2e; } .dot:nth-child(3) { background: #28c840; margin-right: 12px; }
+    pre { margin: 0; padding: 22px 24px; color: #d7dae0; font: 500 17px/1.55 var(--mono); white-space: pre-wrap; }
+    .kw { color: #c792ea; } .fn { color: #82aaff; } .st { color: #c3e88d; } .cm { color: #697386; } .op { color: #89ddff; } .num { color: #f78c6c; }
+
+    .flow { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; align-items: stretch; }
+    .step { position: relative; border: 1px solid var(--line); border-radius: 18px; padding: 20px 18px 18px; background: rgba(255,255,255,.035); min-height: 155px; }
+    .step:not(:last-child)::after { content: "→"; position: absolute; right: -20px; top: 50%; transform: translateY(-50%); color: var(--accent); font-size: 26px; z-index: 3; }
+    .step .num { font: 600 13px/1 var(--mono); color: var(--accent); margin-bottom: 16px; }
+    .step b { display: block; font-size: 20px; margin-bottom: 8px; }
+    .step span { color: var(--muted); font-size: 15px; line-height: 1.4; }
+
+    .matrix { width: 100%; border-collapse: collapse; border: 1px solid var(--line); border-radius: 20px; overflow: hidden; font-size: 20px; }
+    .matrix th, .matrix td { padding: 20px 22px; text-align: left; border-bottom: 1px solid var(--line); }
+    .matrix th { color: var(--text); background: rgba(255,255,255,.055); font-weight: 600; }
+    .matrix td { color: var(--muted); }
+    .matrix tr:last-child td { border-bottom: 0; }
+    .matrix .allow { color: var(--green); font-weight: 600; } .matrix .stop { color: var(--red); font-weight: 600; }
+
+    .split { display: grid; grid-template-columns: .94fr 1.06fr; gap: 34px; align-items: center; }
+    .big-number { font: 600 92px/.85 var(--mono); letter-spacing: -0.08em; color: var(--accent); }
+    .quote { font-size: 34px; line-height: 1.22; letter-spacing: -0.04em; color: var(--text); }
+    .badge-row { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 26px; }
+
+    .warning { border-color: rgba(251,174,66,.42); background: linear-gradient(180deg, rgba(251,174,66,.13), rgba(255,255,255,.025)); }
+    .danger { border-color: rgba(239,68,68,.36); background: linear-gradient(180deg, rgba(239,68,68,.10), rgba(255,255,255,.025)); }
+
+    .kbd { border: 1px solid var(--line-strong); border-bottom-color: rgba(255,255,255,.28); border-radius: 8px; padding: 5px 8px; font: 500 13px/1 var(--mono); color: var(--muted); background: rgba(255,255,255,.05); }
+
+    @media print {
+      html, body { overflow: visible; height: auto; }
+      .deck { height: auto; }
+      .slide { display: flex !important; position: relative; page-break-after: always; width: 100vw; height: 100vh; }
+      .progress { display: none; }
+    }
+
+    @media (max-width: 900px) {
+      .slide { padding: 44px 28px 72px; overflow-y: auto; }
+      .slide::before { inset: 8px; }
+      .footer { left: 28px; right: 28px; bottom: 22px; }
+      .hero-layout, .split, .grid.cols-2, .grid.cols-3, .grid.cols-4 { grid-template-columns: 1fr; }
+      .flow { grid-template-columns: 1fr; }
+      .step:not(:last-child)::after { content: "↓"; right: 50%; top: auto; bottom: -24px; transform: translateX(50%); }
+      .architecture { min-height: 640px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="deck" aria-label="W6 Task 3 Cost Guard Lambda Deep Dive Deck">
+    <section class="slide active" data-title="Cover">
+      <div class="hero-layout">
+        <div class="title-area">
+          <div class="eyebrow">XBrain · Week 6 · Task 3</div>
+          <h1>Cost Guard Lambda deep dive</h1>
+          <p class="lead">Tự động scan EC2/RDS, đọc tag bảo vệ, và stop resource không hợp lệ — với IAM role chỉ có quyền Describe/List + Stop.</p>
+          <div class="badge-row">
+            <span class="pill dot">PR #5 open</span>
+            <span class="pill">Branch: feature/w6-task3-cost-guard</span>
+            <span class="pill">Terraform + Python boto3</span>
+          </div>
+        </div>
+        <div class="architecture" aria-label="Cost Guard Architecture Diagram">
+          <div class="line l1"></div><div class="line l2"></div><div class="line l3"></div><div class="line l4"></div>
+          <div class="node n1"><b>EventBridge</b><span>scheduled rule / daily cron</span></div>
+          <div class="node n2"><b>IAM Role</b><span>least privilege execution</span></div>
+          <div class="node n3"><b>Cost Guard Lambda</b><span>tag check + stop action</span></div>
+          <div class="node n4"><b>EC2</b><span>DescribeInstances → StopInstances</span></div>
+          <div class="node n5"><b>RDS</b><span>DescribeDBInstances → StopDBInstance</span></div>
+        </div>
+      </div>
+      <div class="footer"><span>W6 MH-COST-A support artifact</span><span>Use ← → / Home / End</span></div>
+    </section>
+
+    <section class="slide" data-title="Problem">
+      <div class="header"><div><div class="eyebrow">Why this exists</div><h2>W6 không chấm “có alert”. W6 chấm “automation đã stop thật”.</h2></div><span class="pill">Cost Control & Action</span></div>
+      <div class="body">
+        <div class="grid cols-3">
+          <div class="card danger"><h3>Failure mode</h3><p>Resource redeploy thử nghiệm chạy qua đêm, không ai nhớ tắt, account đốt tiền dù app demo không dùng.</p></div>
+          <div class="card warning"><h3>Email-only budget</h3><p>Budget alert đến muộn vì dữ liệu cost có độ trễ. Notification không chặn billing trong 48h workshop.</p></div>
+          <div class="card green-card"><h3>Guardrail cần có</h3><p>Một scheduled Lambda chủ động scan resource đang chạy và gọi Stop API nếu tag không đạt điều kiện.</p></div>
+        </div>
+        <p class="lead" style="margin-top:36px">Kết luận thiết kế: dùng tag như “runtime contract”. Resource muốn được giữ chạy phải tự chứng minh bằng <span class="mono accent">keep=true</span> hoặc <span class="mono cyan">Environment=dev</span>.</p>
+      </div>
+      <div class="footer"><span>Principle</span><span>Demonstrable, not documented</span></div>
+    </section>
+
+    <section class="slide" data-title="Acceptance Criteria">
+      <div class="header"><div><div class="eyebrow">Acceptance criteria mapping</div><h2>Task yêu cầu gì, mình map thành artifact nào?</h2></div><span class="pill">Done in repo</span></div>
+      <div class="body">
+        <table class="matrix">
+          <thead><tr><th>Yêu cầu</th><th>Implementation</th><th>File</th></tr></thead>
+          <tbody>
+            <tr><td>Lambda scans EC2</td><td><span class="mono">ec2.describe_instances</span> paginator, filter running/pending</td><td class="mono">lambda_function.py</td></tr>
+            <tr><td>Lambda scans RDS</td><td><span class="mono">rds.describe_db_instances</span> + <span class="mono">list_tags_for_resource</span></td><td class="mono">lambda_function.py</td></tr>
+            <tr><td>Stops missing tags</td><td>Stop khi thiếu cả <span class="mono">keep=true</span> và <span class="mono">Environment=dev</span></td><td class="mono">lambda_function.py</td></tr>
+            <tr><td>Least privilege IAM</td><td>Describe/List inventory + Stop EC2/RDS + Logs write</td><td class="mono">main.tf</td></tr>
+            <tr><td>Push GitHub</td><td>Branch pushed to fork, PR opened to upstream</td><td class="mono">PR #5</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="footer"><span>Repository path</span><span class="mono">W6/cost-guard/</span></div>
+    </section>
+
+    <section class="slide" data-title="Architecture">
+      <div class="header"><div><div class="eyebrow">Architecture</div><h2>Operating loop: schedule → scan → decide → stop → prove</h2></div><span class="pill">Event-driven control</span></div>
+      <div class="body">
+        <div class="flow">
+          <div class="step"><div class="num">01</div><b>EventBridge</b><span>Rule invokes Lambda on a schedule. Default is daily; can switch to rate(5 minutes) for demo.</span></div>
+          <div class="step"><div class="num">02</div><b>Lambda</b><span>Creates EC2/RDS clients in current region and paginates inventory APIs.</span></div>
+          <div class="step"><div class="num">03</div><b>Tag contract</b><span>Normalize AWS tag list into dict and evaluate the protection rule.</span></div>
+          <div class="step"><div class="num">04</div><b>Stop action</b><span>Calls StopInstances or StopDBInstance only for unprotected running resources.</span></div>
+          <div class="step"><div class="num">05</div><b>Evidence</b><span>CloudWatch Logs show Lambda decision; CloudTrail proves Stop* API call.</span></div>
+        </div>
+      </div>
+      <div class="footer"><span>Control loop</span><span>CloudTrail Stop event is the grading evidence</span></div>
+    </section>
+
+    <section class="slide" data-title="Tag Rule">
+      <div class="header"><div><div class="eyebrow">Decision rule</div><h2>Resource được giữ chạy khi nó có ít nhất một tag bảo vệ.</h2></div><span class="pill">OR logic</span></div>
+      <div class="body split">
+        <div>
+          <div class="big-number">OR</div>
+          <p class="quote">Không cần cả hai tag. Chỉ cần <span class="accent mono">keep=true</span> hoặc <span class="cyan mono">Environment=dev</span> là resource được skip.</p>
+          <p class="small" style="margin-top:22px">Nếu thiếu cả hai, Lambda coi resource là billable compute không được phép tiếp tục chạy.</p>
+        </div>
+        <table class="matrix">
+          <thead><tr><th>keep</th><th>Environment</th><th>Action</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">true</td><td class="mono">prod</td><td class="allow">Skip / keep running</td></tr>
+            <tr><td class="mono">false</td><td class="mono">dev</td><td class="allow">Skip / keep running</td></tr>
+            <tr><td class="mono">missing</td><td class="mono">dev</td><td class="allow">Skip / keep running</td></tr>
+            <tr><td class="mono">missing</td><td class="mono">prod</td><td class="stop">Stop</td></tr>
+            <tr><td class="mono">missing</td><td class="mono">missing</td><td class="stop">Stop</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="footer"><span>Business rule</span><span class="mono">keep=true OR Environment=dev</span></div>
+    </section>
+
+    <section class="slide" data-title="Lambda Code">
+      <div class="header"><div><div class="eyebrow">Lambda internals</div><h2>Code được tách thành 3 trách nhiệm nhỏ.</h2></div><span class="pill">Python 3.12</span></div>
+      <div class="body grid cols-2" style="align-items:center">
+        <div class="grid" style="gap:18px">
+          <div class="card"><h3>1. Normalize tags</h3><p>AWS trả tag dạng list object. Mình convert thành dict để rule check đơn giản và testable.</p></div>
+          <div class="card"><h3>2. Scan service-specific inventory</h3><p>EC2 tags nằm trong DescribeInstances; RDS phải gọi thêm ListTagsForResource bằng ARN.</p></div>
+          <div class="card"><h3>3. Stop only unprotected</h3><p>Chỉ gọi Stop API khi resource đang chạy và fail tag contract.</p></div>
+        </div>
+        <div class="code"><div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span>lambda_function.py</div><pre><span class="kw">def</span> <span class="fn">_is_protected</span>(tags):
+    keep_value = tags.get(<span class="st">"keep"</span>, <span class="st">""</span>).lower()
+    env_value = tags.get(<span class="st">"Environment"</span>, <span class="st">""</span>).lower()
+    <span class="kw">return</span> keep_value == <span class="st">"true"</span> <span class="op">or</span> env_value == <span class="st">"dev"</span>
+
+<span class="kw">if</span> <span class="op">not</span> _is_protected(tags):
+    ec2.stop_instances(InstanceIds=[instance_id])
+
+<span class="kw">if</span> <span class="op">not</span> _is_protected(tags):
+    rds.stop_db_instance(DBInstanceIdentifier=db_id)</pre></div>
+      </div>
+      <div class="footer"><span>Implementation note</span><span>RDS tag shape differs from EC2</span></div>
+    </section>
+
+    <section class="slide" data-title="IAM">
+      <div class="header"><div><div class="eyebrow">Least privilege IAM</div><h2>Role chỉ có quyền nhìn inventory và stop target.</h2></div><span class="pill">No admin policy</span></div>
+      <div class="body split">
+        <div class="card strong">
+          <h3>Allowed actions</h3>
+          <ul>
+            <li><span class="mono">ec2:DescribeInstances</span></li>
+            <li><span class="mono">ec2:StopInstances</span></li>
+            <li><span class="mono">rds:DescribeDBInstances</span></li>
+            <li><span class="mono">rds:ListTagsForResource</span></li>
+            <li><span class="mono">rds:StopDBInstance</span></li>
+            <li><span class="mono">logs:CreateLogStream</span>, <span class="mono">logs:PutLogEvents</span></li>
+          </ul>
+        </div>
+        <div class="grid" style="gap:18px">
+          <div class="card"><h3>Why Describe uses *</h3><p>AWS inventory APIs như DescribeInstances không hỗ trợ resource-level ARN restriction, nên cần <span class="mono">resources = ["*"]</span>.</p></div>
+          <div class="card"><h3>Stop is scoped by ARN</h3><p>StopInstances và StopDBInstance được scope về instance/db ARN trong current account + region.</p></div>
+          <div class="card"><h3>Log group managed by Terraform</h3><p>Terraform tạo log group trước, nên Lambda không cần <span class="mono">logs:CreateLogGroup</span>.</p></div>
+        </div>
+      </div>
+      <div class="footer"><span>IAM design</span><span>Describe/List + Stop only</span></div>
+    </section>
+
+    <section class="slide" data-title="Terraform">
+      <div class="header"><div><div class="eyebrow">Terraform artifact</div><h2>Một folder deploy được: zip code, role, Lambda, schedule.</h2></div><span class="pill">W6/cost-guard</span></div>
+      <div class="body grid cols-2" style="align-items:center">
+        <div class="code"><div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span>main.tf</div><pre>data <span class="st">"archive_file"</span> <span class="st">"cost_guard_zip"</span> { ... }
+
+resource <span class="st">"aws_iam_role"</span> <span class="st">"cost_guard_lambda"</span> { ... }
+
+resource <span class="st">"aws_lambda_function"</span> <span class="st">"cost_guard"</span> {
+  runtime = <span class="st">"python3.12"</span>
+  handler = <span class="st">"lambda_function.lambda_handler"</span>
+}
+
+resource <span class="st">"aws_cloudwatch_event_rule"</span> <span class="st">"cost_guard_schedule"</span> {
+  schedule_expression = var.schedule_expression
+}</pre></div>
+        <div class="grid" style="gap:18px">
+          <div class="card"><h3>Default schedule</h3><p><span class="mono">cron(0 18 * * ? *)</span> — daily guardrail, phù hợp vận hành.</p></div>
+          <div class="card"><h3>Demo schedule</h3><p><span class="mono">rate(5 minutes)</span> — dùng tạm để tạo CloudTrail evidence nhanh.</p></div>
+          <div class="card"><h3>Dry run switch</h3><p><span class="mono">dry_run=true</span> dùng rehearsal; acceptance demo cần <span class="mono">false</span> để có Stop API event thật.</p></div>
+        </div>
+      </div>
+      <div class="footer"><span>Deploy commands</span><span class="mono">terraform init → plan → apply</span></div>
+    </section>
+
+    <section class="slide" data-title="Evidence">
+      <div class="header"><div><div class="eyebrow">Evidence chain</div><h2>Chấm điểm bằng chuỗi bằng chứng, không chỉ bằng code.</h2></div><span class="pill">docs/W6_evidence.md</span></div>
+      <div class="body">
+        <div class="grid cols-4">
+          <div class="card"><h3>1. Before</h3><p>EC2/RDS đang running/available và thiếu cả <span class="mono">keep=true</span> lẫn <span class="mono">Environment=dev</span>.</p></div>
+          <div class="card"><h3>2. Invoke</h3><p>EventBridge rule fire Lambda. Có log “Stopping EC2/RDS…” trong CloudWatch Logs.</p></div>
+          <div class="card"><h3>3. After</h3><p>Resource chuyển sang stopping/stopped. Đây là proof automation có action.</p></div>
+          <div class="card strong"><h3>4. CloudTrail</h3><p>Event <span class="mono">StopInstances</span> hoặc <span class="mono">StopDBInstance</span> do Lambda role thực hiện.</p></div>
+        </div>
+        <p class="lead" style="margin-top:36px">Screenshot IAM policy + before/after + CloudTrail Stop event là đủ mạnh để defend Task 3 trong presentation.</p>
+      </div>
+      <div class="footer"><span>Grading lens</span><span>Notification ≠ control. Stop event = control.</span></div>
+    </section>
+
+    <section class="slide" data-title="Validation">
+      <div class="header"><div><div class="eyebrow">Verification already done</div><h2>Trước khi push, mình validate cả Python lẫn Terraform.</h2></div><span class="pill dot">All passed</span></div>
+      <div class="body split">
+        <div class="code"><div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span>local verification</div><pre>$ python3 -m py_compile lambda_function.py
+<span class="green"># ok</span>
+
+$ terraform fmt -check -recursive .
+<span class="green"># ok</span>
+
+$ terraform init -backend=false -input=false
+<span class="green"># ok</span>
+
+$ terraform validate
+<span class="green">Success! The configuration is valid.</span></pre></div>
+        <div class="grid" style="gap:18px">
+          <div class="card green-card"><h3>Syntax confidence</h3><p>Python compile check bắt lỗi cú pháp trước khi Lambda package.</p></div>
+          <div class="card green-card"><h3>Terraform confidence</h3><p>fmt + validate xác nhận HCL hợp lệ và provider graph resolve được.</p></div>
+          <div class="card warning"><h3>Runtime vẫn cần AWS demo</h3><p>Acceptance cuối cùng cần deploy thật và capture CloudTrail Stop event trong account W6.</p></div>
+        </div>
+      </div>
+      <div class="footer"><span>Local validation</span><span>Static validation pass, runtime evidence next</span></div>
+    </section>
+
+    <section class="slide" data-title="GitHub">
+      <div class="header"><div><div class="eyebrow">GitHub delivery</div><h2>Không có quyền push upstream, nên dùng fork + PR.</h2></div><span class="pill">PR workflow</span></div>
+      <div class="body grid cols-2" style="align-items:center">
+        <div class="card strong">
+          <h3>Delivery state</h3>
+          <ul>
+            <li>Branch: <span class="mono">feature/w6-task3-cost-guard</span></li>
+            <li>Commit: <span class="mono">b58b0fe</span></li>
+            <li>Title: <span class="mono">feat(w6): add cost guard lambda</span></li>
+            <li>PR: <span class="mono">https://github.com/TechX-Corp/xbrain-learners/pull/5</span></li>
+          </ul>
+        </div>
+        <div class="card cyan-card">
+          <h3>Important context</h3>
+          <p>Account <span class="mono">NguyenHuuDinh135</span> chỉ có READ permission trên upstream <span class="mono">TechX-Corp/xbrain-learners</span>. Vì vậy mình fork repo, push branch lên fork, rồi mở PR về upstream.</p>
+          <p style="margin-top:18px">Mình cũng không commit các file W2/W3/W4 đang bị delete sẵn trong working tree, để PR chỉ chứa Task 3.</p>
+        </div>
+      </div>
+      <div class="footer"><span>PR</span><span class="mono">TechX-Corp/xbrain-learners#5</span></div>
+    </section>
+
+    <section class="slide" data-title="Q&A Drill">
+      <div class="header"><div><div class="eyebrow">Q&A drill</div><h2>Nếu trainer hỏi, trả lời theo 5 ý này.</h2></div><span class="pill">Presentation ready</span></div>
+      <div class="body">
+        <div class="grid cols-2">
+          <div class="card"><h3>1. Lambda quyết định stop thế nào?</h3><p>Nó normalize tag rồi check <span class="mono">keep=true OR Environment=dev</span>. Fail cả hai thì stop.</p></div>
+          <div class="card"><h3>2. Vì sao cần schedule?</h3><p>Budget cost data trễ 8–24h; schedule scan resource state trực tiếp nên chặn lãng phí sớm hơn.</p></div>
+          <div class="card"><h3>3. Least privilege ở đâu?</h3><p>Role không có admin. Chỉ Describe/List inventory, Stop target, và ghi Lambda logs.</p></div>
+          <div class="card"><h3>4. Chứng minh stop bằng gì?</h3><p>Before/after state + CloudTrail <span class="mono">StopInstances</span>/<span class="mono">StopDBInstance</span> với principal là Lambda role.</p></div>
+          <div class="card"><h3>5. RDS khác EC2 chỗ nào?</h3><p>EC2 trả tag trong instance object; RDS cần gọi <span class="mono">ListTagsForResource</span> bằng DB ARN.</p></div>
+          <div class="card strong"><h3>One-liner</h3><p>“Đây là cost safety net: resource không tự chứng minh được quyền chạy thì bị automation dừng.”</p></div>
+        </div>
+      </div>
+      <div class="footer"><span>Defense</span><span>Explain mechanism, not just deliverable</span></div>
+    </section>
+
+    <section class="slide" data-title="Next Steps">
+      <div class="header"><div><div class="eyebrow">Next steps for W6 evidence</div><h2>Việc còn lại là deploy trong AWS account và chụp evidence.</h2></div><span class="pill">Action plan</span></div>
+      <div class="body">
+        <div class="flow">
+          <div class="step"><div class="num">A</div><b>Apply Terraform</b><span>Deploy Lambda, role, log group, EventBridge rule.</span></div>
+          <div class="step"><div class="num">B</div><b>Create target</b><span>Start one tiny EC2/RDS without keep=true and without Environment=dev.</span></div>
+          <div class="step"><div class="num">C</div><b>Speed up demo</b><span>Temporarily set schedule to rate(5 minutes).</span></div>
+          <div class="step"><div class="num">D</div><b>Capture proof</b><span>Screenshot before/after and CloudTrail Stop event.</span></div>
+          <div class="step"><div class="num">E</div><b>Restore safe config</b><span>Return daily schedule and avoid leaving billable resources running.</span></div>
+        </div>
+        <p class="lead" style="margin-top:40px">Slide này có thể dùng ngay trong phần W6 Architecture hoặc Task 3 demo explanation.</p>
+      </div>
+      <div class="footer"><span>Close</span><span>Build → verify → evidence → explain</span></div>
+    </section>
+
+    <div class="progress" aria-hidden="true"><span id="progressBar"></span></div>
+    <div id="counter" class="footer" style="justify-content:center; pointer-events:none;"><span></span></div>
+  </main>
+
+  <script>
+    (function () {
+      const slides = Array.from(document.querySelectorAll('.slide'));
+      const progress = document.getElementById('progressBar');
+      const counter = document.getElementById('counter').querySelector('span');
+      let index = 0;
+
+      try {
+        const saved = window.localStorage.getItem('w6-cost-guard-slide');
+        if (saved !== null) index = Math.min(Math.max(parseInt(saved, 10) || 0, 0), slides.length - 1);
+      } catch (_) {}
+
+      function render() {
+        slides.forEach((slide, i) => slide.classList.toggle('active', i === index));
+        progress.style.width = ((index + 1) / slides.length * 100) + '%';
+        counter.textContent = `${index + 1} / ${slides.length}`;
+        try { window.localStorage.setItem('w6-cost-guard-slide', String(index)); } catch (_) {}
+      }
+
+      function go(next) {
+        index = Math.min(Math.max(next, 0), slides.length - 1);
+        render();
+      }
+
+      document.addEventListener('keydown', (event) => {
+        const key = event.key;
+        if (key === 'ArrowRight' || key === 'PageDown' || key === ' ') { event.preventDefault(); go(index + 1); }
+        if (key === 'ArrowLeft' || key === 'PageUp') { event.preventDefault(); go(index - 1); }
+        if (key === 'Home') { event.preventDefault(); go(0); }
+        if (key === 'End') { event.preventDefault(); go(slides.length - 1); }
+      });
+
+      document.addEventListener('click', (event) => {
+        if (event.target.closest('a, button')) return;
+        if (event.clientX > window.innerWidth * 0.72) go(index + 1);
+        if (event.clientX < window.innerWidth * 0.18) go(index - 1);
+      });
+
+      render();
+    })();
+  </script>
+</body>
+</html>
